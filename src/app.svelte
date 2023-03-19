@@ -10,6 +10,30 @@
   let timer;
   let controller = null;
   let textAreaHeight = 20;
+  let isLoaded = false;
+  
+  onMount(() => {
+    isLoaded = true;
+    if (location.protocol == 'about:')
+      document.querySelector('head style').innerHTML = "";
+    messages = loadData('messages', [
+      { id: 1, text: "Hello" },
+      { id: 2, text: "This is a svelte app" },
+      { id: 3, text: "You can edit and delete messages" },
+    ]);
+    endpoints = loadData('endpoints', [
+      { name: "Pretty name", key: "KEY", url: "https://dashboard.scale.com/spellbook/api/v2/deploy/URL" },
+    ]);
+    log("Loaded data");
+  });
+
+  $: {
+    if (isLoaded) {
+      saveData('messages', messages);
+      saveData('endpoints', endpoints);
+      log("Saved data");
+    }
+  }
   
   function log(message, ...args) {
     console.log(message, ...args);
@@ -33,25 +57,8 @@
     }
   }
 
-  onMount(() => {
-    document.querySelector('head style').innerHTML = "";
-    messages = loadData('messages', [
-      { id: 1, text: "Hello" },
-      { id: 2, text: "This is a svelte app" },
-      { id: 3, text: "You can edit and delete messages" },
-    ]);
-    endpoints = loadData('endpoints', [
-      { name: "max=512 | t=1.0", key: "clfe7qtja00j4ux1arpu3trid", url: "https://dashboard.scale.com/spellbook/api/v2/deploy/uj83bix" },
-    ]);
-  });
-
-  $: {
-    saveData('messages', messages);
-    saveData('endpoints', endpoints);
-  }
-  
   function getNextMessageId() {
-    return Math.max(...messages.map(m => m.id)) + 1;
+    return (Math.max(...messages.map(m => m.id)) ?? 0) + 1;
   }
 
   async function sendMessage(e) {
@@ -156,9 +163,9 @@
   }
 </script>
 
-<head>
+<svelte:head>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-</head>
+</svelte:head>
 
 <!-- HTML template for displaying elements -->
 <div class="app">
@@ -212,6 +219,10 @@
 </div>
 
 <style>
+  :root {
+    color-scheme: dark;
+    font: 15px Segoe UI, sans-serif;
+  }
   .app {
     border: solid 1px #666;
     background: #111;
