@@ -1,0 +1,5 @@
+.app.svelte-1nvfbbf.svelte-1nvfbbf{border:solid 1px #666;background:#111;padding:8px;border-radius:8px}details.svelte-1nvfbbf.svelte-1nvfbbf{border:solid 1px #666;background:#222;padding:8px;margin:0 0 8px 0;border-radius:8px}details[open].svelte-1nvfbbf summary.svelte-1nvfbbf{padding:0 0 8px 0;font-weight:700;cursor:pointer}h3.svelte-1nvfbbf.svelte-1nvfbbf{font:inherit;font-weight:500;margin:0}.messages.svelte-1nvfbbf.svelte-1nvfbbf,.endpoints.svelte-1nvfbbf.svelte-1nvfbbf{display:flex;flex-flow:column;gap:8px}.message.svelte-1nvfbbf.svelte-1nvfbbf,.endpoint.svelte-1nvfbbf.svelte-1nvfbbf{display:flex;flex-flow:row;align-items:flex-start;gap:8px}.new-message.svelte-1nvfbbf.svelte-1nvfbbf{margin:12px 0 0 0}textarea.svelte-1nvfbbf.svelte-1nvfbbf,input[type=text].svelte-1nvfbbf.svelte-1nvfbbf{flex:1;border-style:solid;border-width:1px;border-radius:4px;padding:2px 6px;font:inherit;resize:none;overflow:hidden}.status.svelte-1nvfbbf.svelte-1nvfbbf{opacity:0.6}button.svelte-1nvfbbf.svelte-1nvfbbf{height:26px}button.svelte-1nvfbbf .fa.svelte-1nvfbbf{font-size:18px;font-weight:100;width:18px}
+:root {
+    color-scheme: dark;
+    font: 15px Segoe UI, sans-serif;
+}
