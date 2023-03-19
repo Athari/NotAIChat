@@ -3,27 +3,28 @@
 
   let endpoints = [];
   let selectedEndpointIndex = 0;
+  let multiMessageCount = 10;
   let messages = [];
   let newMessageText = "";
   let isSending = false;
   let statusText = "Welcome!";
-  let timer;
   let controller = null;
-  let textAreaHeight = 20;
   let isLoaded = false;
+  const textAreaHeight = 20;
   
   onMount(() => {
     isLoaded = true;
     if (location.protocol == 'about:')
       document.querySelector('head style').innerHTML = "";
     messages = loadData('messages', [
-      { id: 1, text: "Hello" },
-      { id: 2, text: "This is a svelte app" },
-      { id: 3, text: "You can edit and delete messages" },
+      { id: 1, text: "Hello GPT-4!" },
     ]);
     endpoints = loadData('endpoints', [
-      { name: "Pretty name", key: "KEY", url: "https://dashboard.scale.com/spellbook/api/v2/deploy/URL" },
+      getEndpointPlaceholder(),
     ]);
+    ({ selectedEndpointIndex, multiMessageCount } = loadData('options', {
+      selectedEndpointIndex, multiMessageCount,
+    }));
     //log("Loaded data");
   });
 
@@ -31,6 +32,7 @@
     if (isLoaded) {
       saveData('messages', messages);
       saveData('endpoints', endpoints);
+      saveData('options', { selectedEndpointIndex, multiMessageCount });
       //log("Saved data");
     }
   }
@@ -61,45 +63,72 @@
     return (Math.max(...messages.map(m => m.id)) ?? 0) + 1;
   }
 
-  async function sendMessage(e) {
+  async function sendRequest(endpoint) {
+    return await fetch(endpoint.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Basic ' + endpoint.key,
+      },
+      body: JSON.stringify({
+        input: {
+          input: messages.map(m => m.text).join("\n"),
+        },
+      }),
+      signal: controller.signal,
+    });
+  }
+
+  async function displayMessage(e, lastMessage, response, extraText) {
+    const json = await response.json();
+    if (json.error != null) {
+      log(`Received error${extraText}: ${json.error.code}: ${json.error.message}`);
+    } else if (json.output != null) {
+      if (lastMessage == null) {
+        lastMessage = { id: getNextMessageId(), text: json.output };
+        addMessage({ target: e.target });
+        messages = [ ...messages, lastMessage ];
+      } else {
+        lastMessage.text += ` ${json.output}`;
+        messages = [ ...messages ];
+      }
+      log(`Received message${extraText}`, json);
+    }
+    return lastMessage;
+  }
+
+  async function sendMessageChunkedInternal(e, messageCount) {
     isSending = true;
-    timer = performance.now();
     try {
       const selectedEndpoint = endpoints[selectedEndpointIndex];
       if (selectedEndpoint == null)
-        throw new Error("No endpoint selected");      
-      controller = new AbortController();
-      const response = await fetch(selectedEndpoint.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Basic ' + selectedEndpoint.key,
-        },
-        body: JSON.stringify({
-          input: {
-            input: messages.map(m => m.text).join("\n"),
-          },
-        }),
-        signal: controller.signal,
-      });
-      const timeText = `${(performance.now() - timer).toFixed(2)} ms`;
-      if (response.ok) {
-        const json = await response.json();
-        if (json.error != null) {
-          log(`Received error in ${timeText}: ${json.error.code}: ${json.error.message}`);
-        } else if (json.output != null) {
-          const nextMessageId = getNextMessageId();
-          addMessage({ target: e.target });
-          messages = [ ...messages, { id: nextMessageId + 1, text: json.output } ];
-          log(`Received message in ${timeText}`, json);
-        }
-      } else {
-        throw new Error(`${response.status} ${response.statusText}`);
+        throw new Error("No endpoint selected");
+      let lastMessage = null;
+      for (let iMessage = 0; iMessage < messageCount; iMessage++) {
+        const indexText = messageCount > 1 ? ` (${iMessage + 1}/${messageCount})` : "";
+        controller = new AbortController();
+        const timer = performance.now();
+        const response = await sendRequest(selectedEndpoint);
+        const timeText = `${(performance.now() - timer).toFixed(2)} ms`;
+        if (controller.signal.aborted)
+          return;
+        else if (response.ok)
+          lastMessage = await displayMessage(e, lastMessage, response, `${indexText} in ${timeText}`);
+        else
+          throw new Error(`${response.status} ${response.statusText}`);
       }
     } catch (ex) {
       log(`Error: ${ex.message}`, ex);
     }
     isSending = false;
+  }
+
+  async function sendMessage(e) {
+    return await sendMessageChunkedInternal(e, 1);
+  }
+
+  async function sendMessageChunked(e) {
+    return await sendMessageChunkedInternal(e, +multiMessageCount);
   }
 
   function stopMessage() {
@@ -115,7 +144,7 @@
       return;
     messages = [ ...messages, { id: getNextMessageId(), text: newMessageText } ];
     newMessageText = "";
-    updateTextAreaSize({ target: e.target.closest('.message').querySelector('textarea') });
+    updateMessageTextAreaSize(e);
   }
   
   function deleteMessage(im) {
@@ -137,9 +166,17 @@
       log(`Failed to copy messages to clipboard: ${ex.message}`, ex);
     }
   }
+
+  function updateMessageTextAreaSize(e) {
+    updateTextAreaSizeDelayed({ target: e.target.closest('.message').querySelector('textarea') });
+  }
+
+  function getEndpointPlaceholder() {
+    return { name: "Pretty name", key: "KEY", url: "https://dashboard.scale.com/spellbook/api/v2/deploy/URL" };
+  }
   
-  function addEndpoint(ie) {
-    endpoints = [ ...endpoints, { key: "", url: "" } ];
+  function addEndpoint() {
+    endpoints = [ ...endpoints, getEndpointPlaceholder() ];
   }
 
   function deleteEndpoint(ie) {
@@ -149,14 +186,24 @@
   }
   
   function updateTextAreaSize({ target }) {
-    setTimeout(() => {
-      target.style.height = '0';
-      target.style.height = `${Math.max(target.scrollHeight, textAreaHeight)}px`;
-    }, 100);
+    target.style.height = '0';
+    target.style.overflow = 'hidden';
+    target.style.height = `${Math.max(target.scrollHeight, textAreaHeight)}px`;
+    target.style.overflow = '';
+  }
+
+  function updateTextAreaSizeDelayed({ target }) {
+    updateTextAreaSize({ target });
+    setTimeout(() => { updateTextAreaSize({ target }) }, 50);
+  }
+
+  function updateAllTextAreaSizes(){
+    for (const target of document.querySelectorAll('textarea'))
+      updateTextAreaSize({ target });
   }
 
   function autoResizeTextArea(el) {
-    updateTextAreaSize({ target: el });
+    updateTextAreaSizeDelayed({ target: el });
     el.addEventListener('input', updateTextAreaSize);
     //el.addEventListener('change', updateTextAreaSize);
     return {
@@ -168,6 +215,8 @@
 <svelte:head>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
 </svelte:head>
+
+<svelte:window on:resize={updateAllTextAreaSizes} />
 
 <!-- HTML template for displaying elements -->
 <div class="app">
@@ -184,12 +233,19 @@
           <button on:click={e => deleteEndpoint(ie)} title="Delete endpoint"><i class="fa fa-trash-o"></i></button>
         </div>
       {/each}
+      <h3>Behavior</h3>
+      <div class="options">
+        <div class="option">
+          <label for=multiMessageCount>Multi-message count</label>
+          <input type=text bind:value={multiMessageCount} id=multiMessageCount />
+        </div>
+      </div>
     </div>
   </details>
   <div class="messages">
     {#each messages as message, im}
       <div class="message">
-        <textarea bind:value={message.text} autocomplete="false" use:autoResizeTextArea></textarea>
+        <textarea bind:value={message.text} autocomplete=false use:autoResizeTextArea></textarea>
         <button on:click={e => swapMessages(im, im - 1)} disabled={im <= 0} title="Move message up">
           <i class="fa fa-arrow-up"></i>
         </button>
@@ -203,9 +259,12 @@
     {/each}
   </div>
   <div class="message new-message">
-    <textarea bind:value={newMessageText} disabled={isSending} autocomplete="false" use:autoResizeTextArea></textarea>
+    <textarea bind:value={newMessageText} disabled={isSending} autocomplete=false use:autoResizeTextArea></textarea>
     <button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
       <i class="fa fa-paper-plane"></i>
+    </button>
+    <button on:click={e => sendMessageChunked(e)} disabled={isSending} title="Send message and receive {multiMessageCount} messages">
+      <i class="fa fa-rocket"></i>
     </button>
     <button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
       <i class="fa fa-ban"></i>
@@ -214,7 +273,7 @@
       <i class="fa fa-plus"></i>
     </button>
     <button on:click={copyMessages} title="Copy messages to clipboard">
-      <i class="fa fa-clipboard fa-lg"></i>
+      <i class="fa fa-clone"></i>
     </button>
   </div>
   <p class="status">{statusText}</p>
@@ -249,17 +308,29 @@
     margin: 0;
   }
   .messages,
-  .endpoints {
+  .endpoints,
+  .options {
     display: flex;
     flex-flow: column;
     gap: 8px;
   }
+  .options {
+    flex-flow: column wrap;
+  }
   .message,
-  .endpoint {
+  .endpoint,
+  .option {
     display: flex;
     flex-flow: row;
     align-items: flex-start;
     gap: 8px;
+  }
+  .option {
+    align-items: center;
+    width: 400px;
+  }
+  .option label {
+    flex: 1;
   }
   .new-message {
     margin: 12px 0 0 0;
@@ -273,6 +344,13 @@
     padding: 2px 6px;
     font: inherit;
     resize: none;
+    overflow: hidden;
+  }
+  input[type=radio] {
+    align-self: stretch;
+  }
+  textarea:hover {
+    overflow-y: overlay;
   }
   .status {
     opacity: 0.6;
