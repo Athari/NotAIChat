@@ -91,6 +91,7 @@
       } else {
         lastMessage.text += ` ${json.output}`;
         messages = [ ...messages ];
+        updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
       }
       log(`Received message${extraText}`, json);
     }
@@ -135,8 +136,8 @@
     if (controller == null)
       return;
     isSending = false;
-    info = "Receiving message cancelled";
     controller.abort();
+    log("Receiving message cancelled");
   }
   
   function addMessage(e) {
@@ -186,10 +187,12 @@
   }
   
   function updateTextAreaSize({ target }) {
+    const oldPageOffset = window.pageYOffset;
     target.style.height = '0';
     target.style.overflow = 'hidden';
     target.style.height = `${Math.max(target.scrollHeight, textAreaHeight)}px`;
     target.style.overflow = '';
+    window.scrollTo(window.pageXOffset, oldPageOffset);
   }
 
   function updateTextAreaSizeDelayed({ target }) {
