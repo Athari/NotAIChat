@@ -6,7 +6,7 @@
   let messages = [];
   let newMessageText = "";
   let isSending = false;
-  let statusText = "";
+  let statusText = "Welcome!";
   let timer;
   let controller = null;
   let textAreaHeight = 20;
@@ -24,14 +24,14 @@
     endpoints = loadData('endpoints', [
       { name: "Pretty name", key: "KEY", url: "https://dashboard.scale.com/spellbook/api/v2/deploy/URL" },
     ]);
-    log("Loaded data");
+    //log("Loaded data");
   });
 
   $: {
     if (isLoaded) {
       saveData('messages', messages);
       saveData('endpoints', endpoints);
-      log("Saved data");
+      //log("Saved data");
     }
   }
   
@@ -115,7 +115,7 @@
       return;
     messages = [ ...messages, { id: getNextMessageId(), text: newMessageText } ];
     newMessageText = "";
-    setTimeout(() => updateTextAreaSize({ target: e.target.closest('.message').querySelector('textarea') }), 1);
+    updateTextAreaSize({ target: e.target.closest('.message').querySelector('textarea') });
   }
   
   function deleteMessage(im) {
@@ -149,8 +149,10 @@
   }
   
   function updateTextAreaSize({ target }) {
-    target.style.height = '0';
-    target.style.height = `${Math.max(target.scrollHeight, textAreaHeight)}px`;
+    setTimeout(() => {
+      target.style.height = '0';
+      target.style.height = `${Math.max(target.scrollHeight, textAreaHeight)}px`;
+    }, 100);
   }
 
   function autoResizeTextArea(el) {
@@ -271,7 +273,6 @@
     padding: 2px 6px;
     font: inherit;
     resize: none;
-    overflow: hidden;
   }
   .status {
     opacity: 0.6;
