@@ -230,7 +230,7 @@
           <input type=text bind:value={endpoint.name} placeholder="Display name">
           <input type=text bind:value={endpoint.key} placeholder="API Key">
           <input type=text bind:value={endpoint.url} placeholder="Endpoint URL">
-          <button on:click={e => deleteEndpoint(ie)} title="Delete endpoint"><i class="fa fa-trash-o"></i></button>
+          <button on:click={() => deleteEndpoint(ie)} title="Delete endpoint"><i class="fa fa-trash-o"></i></button>
         </div>
       {/each}
       <h3>Behavior</h3>
@@ -246,35 +246,39 @@
     {#each messages as message, im}
       <div class="message">
         <textarea bind:value={message.text} autocomplete=false use:autoResizeTextArea></textarea>
-        <button on:click={e => swapMessages(im, im - 1)} disabled={im <= 0} title="Move message up">
-          <i class="fa fa-arrow-up"></i>
-        </button>
-        <button on:click={e => swapMessages(im, im + 1)} disabled={im >= messages.length - 1} title="Move message down">
-          <i class="fa fa-arrow-down"></i>
-        </button>
-        <button on:click={e => deleteMessage(im)} title="Delete message">
-          <i class="fa fa-trash-o"></i>
-        </button>
+        <div class="buttons">
+          <button on:click={() => swapMessages(im, im - 1)} disabled={im <= 0} title="Move message up">
+            <i class="fa fa-arrow-up"></i>
+          </button>
+          <button on:click={() => swapMessages(im, im + 1)} disabled={im >= messages.length - 1} title="Move message down">
+            <i class="fa fa-arrow-down"></i>
+          </button>
+          <button on:click={() => deleteMessage(im)} title="Delete message">
+            <i class="fa fa-trash-o"></i>
+          </button>
+        </div>
       </div>
     {/each}
   </div>
   <div class="message new-message">
     <textarea bind:value={newMessageText} disabled={isSending} autocomplete=false use:autoResizeTextArea></textarea>
-    <button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
-      <i class="fa fa-paper-plane"></i>
-    </button>
-    <button on:click={e => sendMessageChunked(e)} disabled={isSending} title="Send message and receive {multiMessageCount} messages">
-      <i class="fa fa-rocket"></i>
-    </button>
-    <button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
-      <i class="fa fa-ban"></i>
-    </button>
-    <button on:click={e => addMessage(e)} disabled={isSending} title="Add message without sending">
-      <i class="fa fa-plus"></i>
-    </button>
-    <button on:click={copyMessages} title="Copy messages to clipboard">
-      <i class="fa fa-clone"></i>
-    </button>
+    <div class="buttons">
+      <button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
+        <i class="fa fa-paper-plane"></i>
+      </button>
+      <button on:click={e => sendMessageChunked(e)} disabled={isSending} title="Send message and receive {multiMessageCount} messages">
+        <i class="fa fa-rocket"></i>
+      </button>
+      <button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
+        <i class="fa fa-ban"></i>
+      </button>
+      <button on:click={e => addMessage(e)} disabled={isSending} title="Add message without sending">
+        <i class="fa fa-plus"></i>
+      </button>
+      <button on:click={copyMessages} title="Copy messages to clipboard">
+        <i class="fa fa-clone"></i>
+      </button>
+    </div>
   </div>
   <p class="status">{statusText}</p>
 </div>
@@ -332,6 +336,9 @@
   .option label {
     flex: 1;
   }
+  .buttons {
+    display: contents;
+  }
   .new-message {
     margin: 12px 0 0 0;
   }
@@ -362,5 +369,23 @@
     font-size: 18px;
     font-weight: 100;
     width: 18px;
+  }
+  @media (max-width: 640px) {
+    .buttons {
+      display: flex;
+      flex-flow: column;
+      gap: 8px;
+    }
+    .endpoint {
+      flex-flow: row wrap;
+    }
+    .endpoint input[type=text] {
+      flex: 200px 1;
+    }
+  }
+  @media (max-width: 480px) {
+    .option {
+      width: auto;
+    }
   }
 </style>
