@@ -1,4 +1,5 @@
 <script>
+  'use strict';
   import { onMount } from "svelte";
 
   let options = {
@@ -11,7 +12,7 @@
     getEndpointPlaceholder()
   ];
   let messages = [
-    { id: 1, text: "Hello GPT-4!" }
+    { id: 1, text: "Hello GPT-4!" },
   ];
   let newMessageText = "";
   let isSending = false;
@@ -71,15 +72,16 @@
   }
 
   function getNextMessageId() {
-    return (Math.max(...messages.map(m => m.id)) ?? 0) + 1;
+    const currentMaxId = Math.max(...messages.map(m => m.id));
+    return Number.isFinite(currentMaxId) ? currentMaxId + 1 : 1;
   }
 
   async function sendRequest(endpoint) {
     let url = endpoint.url;
     if (options.selectedProxyIndex == 1)
       url = `https://cors-anywhere.herokuapp.com/${url}`;
-    else if (options.selectedEndpointIndex == 2)
-      url = `https://fishtailprotocol.com/projects/scaleProxy/${url}`;
+    /*else if (options.selectedProxyIndex == 2)
+      url = `https://fishtailprotocol.com/projects/scaleProxy/${url}`;*/
     return await fetch(url, {
       method: 'POST',
       headers: {
@@ -113,40 +115,49 @@
     return lastMessage;
   }
 
-  async function sendMessageChunkedInternal(e, messageCount) {
+  async function sendMessageChunkedInternal(e, messageCount, stopOnFirstSuccess) {
     log("Sending message");
     addMessage({ target: e.target });
     isSending = true;
-    try {
-      const selectedEndpoint = endpoints[options.selectedEndpointIndex];
-      if (selectedEndpoint == null)
-        throw new Error("No endpoint selected");
-      controller = new AbortController();
-      let lastMessage = null;
-      for (let iMessage = 0; iMessage < messageCount; iMessage++) {
-        const timer = performance.now();
-        const response = await sendRequest(selectedEndpoint);
-        const timeText = `${(performance.now() - timer).toFixed(2)} ms`;
-        const indexText = messageCount > 1 ? ` (${iMessage + 1}/${messageCount})` : "";
-        if (controller.signal.aborted)
-          return;
-        else if (response.ok)
-          lastMessage = await displayMessage(e, lastMessage, response, `${indexText} in ${timeText}`);
-        else
-          throw new Error(`${response.status} ${response.statusText}`);
+    const selectedEndpoint = endpoints[options.selectedEndpointIndex];
+    if (selectedEndpoint == null)
+      throw new Error("No endpoint selected");
+    controller = new AbortController();
+    let lastMessage = null;
+    for (let iMessage = 0; iMessage < messageCount; iMessage++) {
+      const indexText = messageCount > 1 ? ` (${iMessage + 1}/${messageCount})` : "";
+      const timer = performance.now();
+      let response;
+      try {
+        response = await sendRequest(selectedEndpoint);
       }
-    } catch (ex) {
-      log(`Error: ${ex.message}`, ex);
+      catch (ex) {
+        log(`Failed to receive message${indexText}: ${ex.message}`, ex);
+        continue;
+      }
+      const timeText = `${(performance.now() - timer).toFixed(2)} ms`;
+      if (controller.signal.aborted)
+        return;
+      else if (response.ok)
+        lastMessage = await displayMessage(e, lastMessage, response, `${indexText} in ${timeText}`);
+      else
+        log(`Received HTTP error${indexText} in ${timeText}: ${response.status} ${response.statusText}`);
+      if (stopOnFirstSuccess && lastMessage != null)
+        return;
     }
     isSending = false;
   }
 
   async function sendMessage(e) {
-    return await sendMessageChunkedInternal(e, 1);
+    return await sendMessageChunkedInternal(e, 1, false);
   }
 
-  async function sendMessageChunked(e) {
-    return await sendMessageChunkedInternal(e, +options.multiMessageCount);
+  async function sendMessageUntilSuccess(e) {
+    return await sendMessageChunkedInternal(e, +options.multiMessageCount, true);
+  }
+
+  async function sendMultiMessage(e) {
+    return await sendMessageChunkedInternal(e, +options.multiMessageCount, false);
   }
 
   function stopMessage() {
@@ -302,9 +313,9 @@
           Go to <a href="https://cors-anywhere.herokuapp.com/corsdemo">CORS Anywhere Demo</a> page and click on the button to enable it.
           You may be asked to solve CAPTCHA. Note that CORS Demo can timeout way earlier than actual Scale API.
           This method allows all websites using that specific website to bypass CORS.
-        <li><b>Web Proxy</b> <i>(desktop/mobile)</i>:
+        <!--<li><b>Web Proxy</b> <i>(desktop/mobile)</i>:
           Use <a href="https://fishtailprotocol.com/projects/scaleProxy/">Web proxy by Feril</a>. No configuration required. This
-          method affects only requests to Scale API.
+          method affects only requests to Scale API.-->
       </ul>
     </details>
   </details>
@@ -332,8 +343,11 @@
       <button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
         <i class="fa fa-paper-plane"></i>
       </button>
-      <button on:click={e => sendMessageChunked(e)} disabled={isSending} title="Send message and receive {options.multiMessageCount} messages">
+      <button on:click={e => sendMultiMessage(e)} disabled={isSending} title="Send message and receive {options.multiMessageCount} messages">
         <i class="fa fa-rocket"></i>
+      </button>
+      <button on:click={e => sendMessageUntilSuccess(e)} disabled={isSending} title="Try sending message {options.multiMessageCount} times">
+        <i class="fa fa-ambulance"></i>
       </button>
       <button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
         <i class="fa fa-ban"></i>
