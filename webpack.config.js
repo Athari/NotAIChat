@@ -2,6 +2,7 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const Dotenv = require('dotenv-webpack');
+const SveltePreprocess = require('svelte-preprocess');
 
 const cssHashMap = { App: 'a' };
 
@@ -33,6 +34,9 @@ module.exports = {
           loader: 'svelte-loader',
           options: {
             emitCss: true,
+            preprocess: SveltePreprocess({
+              less: true,
+            }),
             compilerOptions: {
               cssHash: ({ hash, name, filename, css }) => `s-${cssHashMap[name] ?? hash(filename)}`,
             },
