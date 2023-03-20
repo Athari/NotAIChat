@@ -44,7 +44,9 @@
   
   function loadData(id, defaultData) {
     try {
-      return JSON.parse(localStorage.getItem(id));
+      const data = JSON.parse(localStorage.getItem(id)) ?? defaultData;
+      return typeof data === typeof defaultData && data.constructor.name === defaultData.constructor.name ?
+        data : defaultData;
     } catch (ex) {
       log(`Warning: Failed to load ${id} from localStorage: ${ex.message}`, ex);
       return defaultData;
@@ -221,7 +223,6 @@
 
 <svelte:window on:resize={updateAllTextAreaSizes} />
 
-<!-- HTML template for displaying elements -->
 <div class="app">
   <details open>
     <summary>Options</summary>
