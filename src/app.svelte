@@ -132,7 +132,7 @@
         response = await sendRequest(selectedEndpoint);
       }
       catch (ex) {
-        log(`Failed to receive message${indexText}: ${ex.message}`, ex);
+        log(`Failed to receive message${indexText}: ${ex.message} (Console and Network tabs in DevTools may contain extra details)`, ex);
         continue;
       }
       const timeText = `${(performance.now() - timer).toFixed(2)} ms`;
@@ -322,7 +322,8 @@
   <div class="messages">
     {#each messages as message, im}
       <div class="message">
-        <textarea bind:value={message.text} autocomplete=false use:autoResizeTextArea></textarea>
+        <textarea bind:value={message.text} placeholder="Message #{message.id} text"
+                  autocomplete=false use:autoResizeTextArea></textarea>
         <div class="buttons">
           <button on:click={() => swapMessages(im, im - 1)} disabled={im <= 0} title="Move message up">
             <i class="fa fa-arrow-up"></i>
@@ -338,7 +339,8 @@
     {/each}
   </div>
   <div class="message new-message">
-    <textarea bind:value={newMessageText} disabled={isSending} autocomplete=false use:autoResizeTextArea></textarea>
+    <textarea bind:value={newMessageText} disabled={isSending} placeholder="New message text"
+              autocomplete=false use:autoResizeTextArea></textarea>
     <div class="buttons">
       <button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
         <i class="fa fa-paper-plane"></i>
@@ -365,9 +367,13 @@
 
 <style lang="less">
   :global(:root) {
+    --button-width: 38px;
+    --gap: 8px;
     color-scheme: dark;
     font: 15px/1.2 Segoe UI, sans-serif;
-    *, *::before, *::after {
+    *,
+    *::before,
+    *::after {
       box-sizing: border-box;
     }
   }
@@ -412,7 +418,8 @@
   }
   .message,
   .endpoint,
-  .option {
+  .option,
+  .buttons {
     display: flex;
     flex-flow: row;
     align-items: flex-start;
@@ -425,11 +432,12 @@
       flex: 1;
     }
   }
-  .buttons {
-    display: contents;
-  }
   .new-message {
     margin: 12px 0 0 0;
+    .buttons {
+      flex: 0 0 calc((var(--button-width) + var(--gap) + 0px) * 3 - var(--gap));
+      flex-flow: row wrap;
+    }
   }
   textarea,
   input[type=text],
@@ -454,22 +462,21 @@
   }
   button {
     height: 26px;
+    width: var(--button-width);
     .fa {
       font-size: 18px;
       font-weight: 100;
-      width: 18px;
     }
   }
   p,
   ul {
     margin: 4px 0;
   }
+
   :global(:root.d-compact) {
     @media (max-width: 740px) {
       .buttons {
-        display: flex;
         flex-flow: column;
-        gap: 8px;
       }
       .endpoint {
         flex-flow: row wrap;
@@ -484,13 +491,14 @@
       }
     }
   }
+
   :global(:root:is(.d-mobile, .d-access)) {
+    --button-width: 48px;
     line-height: 1.4;
     button {
       height: 32px;
       .fa {
         font-size: 22px;
-        width: 28px;
       }
     }
     textarea,
@@ -507,14 +515,17 @@
     }
     @media (max-width: 840px) {
       .buttons {
-        display: flex;
         flex-flow: column;
-        gap: 8px;
       }
       .endpoint {
         flex-flow: row wrap;
         input[type=text] {
           flex: 260px 1;
+        }
+      }
+      .new-message {
+        .buttons {
+          flex: 0 0 var(--button-width);
         }
       }
     }
@@ -524,14 +535,15 @@
       }
     }
   }
+
   :global(:root.d-access) {
+    --button-width: 52px;
     font-size: 17px;
     line-height: 1.6;
     button {
       height: 38px;
       .fa {
         font-size: 26px;
-        width: 30px;
       }
     }
   }
