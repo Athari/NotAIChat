@@ -1,6 +1,16 @@
 <script>
   'use strict';
-  import { onMount } from "svelte";
+  import { onMount } from 'svelte'
+  import Fa from 'svelte-fa'
+  import { faPlusLarge } from '@fortawesome/pro-solid-svg-icons/faPlusLarge'
+  import { faXmarkLarge } from '@fortawesome/pro-solid-svg-icons/faXmarkLarge'
+  import { faArrowUp } from '@fortawesome/pro-solid-svg-icons/faArrowUp'
+  import { faArrowDown } from '@fortawesome/pro-solid-svg-icons/faArrowDown'
+  import { faPaperPlane } from '@fortawesome/pro-solid-svg-icons/faPaperPlane'
+  import { faBan } from '@fortawesome/pro-solid-svg-icons/faBan'
+  import { faRocketLaunch } from '@fortawesome/pro-regular-svg-icons/faRocketLaunch'
+  import { faTurtle } from '@fortawesome/pro-regular-svg-icons/faTurtle'
+  import { faCopy } from '@fortawesome/pro-regular-svg-icons/faCopy'
 
   let options = {
     selectedEndpointIndex: 0,
@@ -20,7 +30,11 @@
   let controller = null;
   let isLoaded = false;
   let elRoot = null;
+  let faTheme = {
+    scale: 1.3,
+  };
   const textAreaHeight = 20;
+  const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
   
   onMount(() => {
     isLoaded = true;
@@ -42,6 +56,7 @@
 
   $: elRoot !== null && (o => elRoot.className = `d-${o.density}`)(options);
   $: options.density !== null && updateAllTextAreaSizes();
+  $: faTheme = { scale: faThemeScaleMap[options.density] };
   
   function log(message, ...args) {
     console.log(message, ...args);
@@ -244,9 +259,9 @@
   }
 </script>
 
-<svelte:head>
+<!--<svelte:head>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-</svelte:head>
+</svelte:head>-->
 
 <svelte:window on:resize={updateAllTextAreaSizes} />
 
@@ -254,14 +269,21 @@
   <details open>
     <summary>Options</summary>
     <div class="endpoints">
-      <h3>Scale Endpoints <button on:click={addEndpoint} title="Add endpoint"><i class="fa fa-plus"></i></button></h3>
+      <h3>
+        Scale Endpoints
+        <button on:click={addEndpoint} title="Add endpoint">
+          <Fa icon={faPlusLarge} {...faTheme} />
+        </button>
+      </h3>
       {#each endpoints as endpoint, ie}
         <div class="endpoint">
           <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
           <input type=text bind:value={endpoint.name} placeholder="Display name">
           <input type=text bind:value={endpoint.key} placeholder="API Key">
           <input type=text bind:value={endpoint.url} placeholder="Endpoint URL">
-          <button on:click={() => deleteEndpoint(ie)} title="Delete endpoint"><i class="fa fa-trash-o"></i></button>
+          <button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
+            <Fa icon={faXmarkLarge} {...faTheme} />
+          </button>
         </div>
       {/each}
       <h3>Behavior</h3>
@@ -326,13 +348,13 @@
                   autocomplete=false use:autoResizeTextArea></textarea>
         <div class="buttons">
           <button on:click={() => swapMessages(im, im - 1)} disabled={im <= 0} title="Move message up">
-            <i class="fa fa-arrow-up"></i>
+            <Fa icon={faArrowUp} {...faTheme} />
           </button>
           <button on:click={() => swapMessages(im, im + 1)} disabled={im >= messages.length - 1} title="Move message down">
-            <i class="fa fa-arrow-down"></i>
+            <Fa icon={faArrowDown} {...faTheme} />
           </button>
           <button on:click={() => deleteMessage(im)} title="Delete message">
-            <i class="fa fa-trash-o"></i>
+            <Fa icon={faXmarkLarge} {...faTheme} />
           </button>
         </div>
       </div>
@@ -343,22 +365,22 @@
               autocomplete=false use:autoResizeTextArea></textarea>
     <div class="buttons">
       <button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
-        <i class="fa fa-paper-plane"></i>
+        <Fa icon={faPaperPlane} {...faTheme} />
       </button>
       <button on:click={e => sendMultiMessage(e)} disabled={isSending} title="Send message and receive {options.multiMessageCount} messages">
-        <i class="fa fa-rocket"></i>
+        <Fa icon={faRocketLaunch} {...faTheme} />
       </button>
       <button on:click={e => sendMessageUntilSuccess(e)} disabled={isSending} title="Try sending message {options.multiMessageCount} times">
-        <i class="fa fa-ambulance"></i>
+        <Fa icon={faTurtle} {...faTheme} />
       </button>
       <button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
-        <i class="fa fa-ban"></i>
+        <Fa icon={faBan} {...faTheme} />
       </button>
       <button on:click={e => addMessage(e)} disabled={isSending} title="Add message without sending">
-        <i class="fa fa-plus"></i>
+        <Fa icon={faPlusLarge} {...faTheme} />
       </button>
       <button on:click={copyMessages} title="Copy messages to clipboard">
-        <i class="fa fa-clone"></i>
+        <Fa icon={faCopy} {...faTheme} flip=horizontal />
       </button>
     </div>
   </div>
@@ -463,10 +485,6 @@
   button {
     height: 26px;
     width: var(--button-width);
-    .fa {
-      font-size: 18px;
-      font-weight: 100;
-    }
   }
   p,
   ul {
@@ -497,9 +515,6 @@
     line-height: 1.4;
     button {
       height: 32px;
-      .fa {
-        font-size: 22px;
-      }
     }
     textarea,
     input[type=text],
@@ -542,9 +557,6 @@
     line-height: 1.6;
     button {
       height: 38px;
-      .fa {
-        font-size: 26px;
-      }
     }
   }
 </style>

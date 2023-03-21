@@ -1,10 +1,11 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
+const TerserPlugin = require('terser-webpack-plugin');
 const Dotenv = require('dotenv-webpack');
 const SveltePreprocess = require('svelte-preprocess');
 
-const cssHashMap = { App: 'a' };
+const cssHashMap = { App: 'a', Fa: 'f' };
 
 module.exports = {
   // This says to webpack that we are in development mode and write the code in webpack file in different way
@@ -85,7 +86,15 @@ module.exports = {
     //And it does a text replace in the resulting bundle for any instances of process.env.
     new Dotenv(),
   ],
-  ////Config for webpack-dev-server module
+  optimization: {
+    minimize: true,
+    minimizer: [
+      new TerserPlugin({
+        extractComments: false,
+      }),
+    ],
+  },
+  //Config for webpack-dev-server module
   devServer: {
     historyApiFallback: true,
     contentBase: path.resolve(__dirname, 'dist'),
