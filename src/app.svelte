@@ -11,6 +11,7 @@
   import { faRocketLaunch } from '@fortawesome/pro-regular-svg-icons/faRocketLaunch'
   import { faTurtle } from '@fortawesome/pro-regular-svg-icons/faTurtle'
   import { faCopy } from '@fortawesome/pro-regular-svg-icons/faCopy'
+  import { faShareNodes } from '@fortawesome/pro-regular-svg-icons/faShareNodes'
 
   let options = {
     selectedEndpointIndex: 0,
@@ -38,12 +39,19 @@
   const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
   
   onMount(() => {
-    isLoaded = true;
-    if (location.protocol == 'about:')
-      document.querySelector('head style').innerHTML = "";
+    let newEndpointIndex;
+    try {
+      newEndpointIndex = addEndpointFromSearchParams(new URL(location.href).searchParams);
+      if (location.protocol == 'about:')
+        document.querySelector('head style').innerHTML = "";
+    }
+    catch (ex) { /* Loading below must always run */ }
     messages = loadData('messages', messages);
     endpoints = loadData('endpoints', endpoints);
     options = loadData('options', options);
+    if (newEndpointIndex !== null)
+      options.selectedEndpointIndex = newEndpointIndex;
+    isLoaded = true;
     elRoot = document.documentElement;
   });
 
@@ -163,8 +171,13 @@
         response = await sendRequest(selectedEndpoint);
       }
       catch (ex) {
-        log(`Failed to receive message${indexText} in ${getTimeText()}: ${ex.message} (Console and Network tabs in DevTools may contain extra details)`, ex);
-        continue;
+        if (ex instanceof DOMException && ex.name == 'AbortError') {
+          log(`User cancelled message${indexText} in ${getTimeText()}`, ex);
+          return;
+        } else {
+          log(`Failed to receive message${indexText} in ${getTimeText()}: ${ex.message} (Console and Network tabs in DevTools may contain extra details)`, ex);
+          continue;
+        }
       }
       const timeText = getTimeText();
       if (controller.signal.aborted)
@@ -239,6 +252,34 @@
     endpoints = [ ...endpoints, getEndpointPlaceholder() ];
   }
 
+  function addEndpointFromSearchParams(params) {
+    const endpoint = {
+      name: params.get('name') ?? "Shared endpoint",
+      key: params.get('key'),
+      url: params.get('url'),
+    };
+    if (endpoint.key == null || endpoint.url == null || endpoints.some(e => e.key == endpoint.key))
+      return null;
+    const sameEndpointIndex = endpoints.findIndex(e => e.key == endpoint.key);
+    if (sameEndpointIndex != -1)
+      return sameEndpointIndex;
+    const placeholderKey = getEndpointPlaceholder().key;
+    endpoints = [ ...endpoints.filter(e => e.key != placeholderKey), endpoint ];
+    return endpoints.length - 1;
+  }
+
+  async function shareEndpointLink(ie) {
+    const endpoint = endpoints[ie];
+    const searchParams = new URLSearchParams({ name: endpoint.name, key: endpoint.key, url: endpoint.url });
+    const urlString = `${location.origin}${location.pathname}?${searchParams}`;
+    try {
+      await navigator.clipboard.writeText(urlString);
+      log(`Endpoint share link copied to clipboard: ${urlString}`);
+    } catch (ex) {
+      log(`Failed to copy endpoint share link to clipboard: ${ex.message}`, ex);
+    }
+  }
+
   function deleteEndpoint(ie) {
     endpoints = endpoints.filter((e, i) => i !== ie);
     if (endpoints[options.selectedEndpointIndex] === undefined)
@@ -268,7 +309,6 @@
   function autoResizeTextArea(el) {
     updateTextAreaSizeDelayed({ target: el });
     el.addEventListener('input', updateTextAreaSize);
-    //el.addEventListener('change', updateTextAreaSize);
     return {
       destroy: () => el.removeEventListener('input', updateTextAreaSize),
     }
@@ -293,6 +333,9 @@
           <input type=text bind:value={endpoint.name} placeholder="Display name">
           <input type=text bind:value={endpoint.key} placeholder="API Key">
           <input type=text bind:value={endpoint.url} placeholder="Endpoint URL">
+          <button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
+            <Fa icon={faShareNodes} {...faTheme} />
+          </button>
           <button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
             <Fa icon={faXmarkLarge} {...faTheme} />
           </button>
@@ -329,7 +372,23 @@
     <details>
       <summary>Instructions</summary>
       <h3>Scale API keys</h3>
-      <p>You can use one of public keys or provide your own. Having your own keys gives more flexibility and better privacy.
+      <p>You can use one of the public keys or provide your own. Having your own keys gives more flexibility and better privacy.
+      <ol>
+        <li>Register on <a href="https://spellbook.scale.com/">Scale Spellbook</a>.
+        <li>Create an "app".
+        <li>Add a "prompt" with <code>model=GPT-4</code>, <code>max_tokens=512</code>, <code>temperature=1</code>,
+          <code>user_template={'{{'}input{'}}'}</code>.
+          <ul>
+            <li>Max token limit drastically (non-linearly) affects how fast the website responds. You can try lowering it,
+              especially if you plan to use it for chat, but forget about going above 1024 tokens.
+            <li>Temperature affects how wild the generations are, where 0.0 generates consistent responses and 2.0 is completely nuts.
+              Default value in OpenAI interface is 0.7. Recommended values are 0.4–1.0.
+            <li>Adjust the template if you plan to use the app for chat or other purposes. GPT-4 model will see the text
+              around <code>{'{{'}input{'}}'}</code>, but the chat app will not.
+          </ul>
+        <li>Add a "deployment" with this "prompt".
+        <li>Add a new Scale API endpoint in the chat's options and copy API key and URL from Scale website.
+      </ol>
       <h3>Proxy</h3>
       <p>The method of bypassing CORS restrictions for the chat script. One is enough.
       <ul>
@@ -458,7 +517,8 @@
   h3 {
     font: inherit;
     font-weight: 500;
-    margin: 0;
+    font-size: 1.2em;
+    margin: 2px 0;
   }
   .messages,
   .endpoints,
