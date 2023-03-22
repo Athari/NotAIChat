@@ -89,7 +89,7 @@ module.exports = {
     //take our environment variable in .env file
     //And it does a text replace in the resulting bundle for any instances of process.env.
     new Dotenv(),
-    // Incline CSS and JS
+    // Inline CSS and JS
     {
       apply(compiler) {
         const pluginName = 'InlineCode';

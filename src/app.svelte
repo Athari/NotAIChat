@@ -95,25 +95,37 @@
     let url = endpoint.url;
     if (options.selectedProxyIndex == 1)
       url = `https://cors-anywhere.herokuapp.com/${url}`;
-    /*else if (options.selectedProxyIndex == 2)
-      url = `https://fishtailprotocol.com/projects/scaleProxy/${url}`;*/
+    else if (options.selectedProxyIndex == 2)
+      url = `https://fishtailprotocol.com/projects/betterGPT4/scale-api.php`;
+    let messageText = messages.map(m => m.text).join("\n");
+    let data = { input: { input: messageText } };
+    if (options.selectedProxyIndex == 2)
+      data = { OAIToken: endpoint.key, scaleURL: endpoint.url, chatLog: messageText };
+    let headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Basic ' + endpoint.key,
+    };
+    if (options.selectedProxyIndex == 2)
+      delete headers.Authorization;
     return await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Basic ' + endpoint.key,
-      },
-      body: JSON.stringify({
-        input: {
-          input: messages.map(m => m.text).join("\n"),
-        },
-      }),
+      headers,
+      body: JSON.stringify(data),
       signal: controller.signal,
     });
   }
 
   async function displayMessage(e, lastMessage, response, extraText) {
-    const json = await response.json();
+    let json;
+    try {
+      json = await response.json();
+      if (json.response != null)
+        json = json.response;
+    }
+    catch (ex) {
+      log(`Failed to decode message${extraText}: ${ex.message}`, ex);
+      return lastMessage;
+    }
     if (json.error != null) {
       log(`Received error${extraText}: ${json.error.code}: ${json.error.message}`);
     } else if (json.output != null) {
@@ -126,6 +138,8 @@
         updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
       }
       log(`Received message${extraText}`, json);
+    } else {
+      log(`Failed to interpret message${extraText}`, json);
     }
     return lastMessage;
   }
@@ -259,10 +273,6 @@
   }
 </script>
 
-<!--<svelte:head>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-</svelte:head>-->
-
 <svelte:window on:resize={updateAllTextAreaSizes} />
 
 <div class="app">
@@ -301,7 +311,7 @@
           <select bind:value={options.selectedProxyIndex} id=selectedProxyIndex>
             <option value={0}>Direct</option>
             <option value={1}>CORS Demo</option>
-            <!--<option value={2}>Web proxy</option>-->
+            <option value={2}>Web proxy</option>
           </select>
         </div>
         <div class="option">
@@ -312,6 +322,8 @@
     </div>
     <details>
       <summary>Instructions</summary>
+      <h3>Scale API keys</h3>
+      <p>You can use one of public keys or provide your own. Having your own keys gives more flexibility and better privacy.
       <h3>Proxy</h3>
       <p>The method of bypassing CORS restrictions for the chat script. One is enough.
       <ul>
@@ -335,11 +347,26 @@
           Go to <a href="https://cors-anywhere.herokuapp.com/corsdemo">CORS Anywhere Demo</a> page and click on the button to enable it.
           You may be asked to solve CAPTCHA. Note that CORS Demo can timeout way earlier than actual Scale API.
           This method allows all websites using that specific website to bypass CORS.
-        <!--<li><b>Web Proxy</b> <i>(desktop/mobile)</i>:
-          Use <a href="https://fishtailprotocol.com/projects/scaleProxy/">Web proxy by Feril</a>. No configuration required. This
-          method affects only requests to Scale API.-->
+        <li><b>Web Proxy</b> <i>(desktop/mobile)</i>:
+          Use <a href="https://fishtailprotocol.com/projects/betterGPT4/">Web proxy by Feril</a>. No configuration required. This
+          method works exclusively with Scale API.
       </ul>
-    </details>
+      <h3>Privacy</h3>
+      <p>Privacy does not exist.
+      <ul>
+        <li>All your prompts and responses are visible to the owner of the Scale API key.
+        <li>All your prompts, responses and keys are visible to the company that owns Scale API.
+        <li>All your prompts, responses and keys are visible to the owner of CORS and web proxies.
+      </ul>
+      <p>Recommendations for maximum privacy:
+      <ul>
+        <li>Do not use public Scale API keys.
+        <lI>Do not use proxies owned by people you don't trust.
+        <li>Do not send any information which could be used to identify you.
+        <li>Do register on Scale with fake data, including fake email.
+        <li>Do live in counrties where FBI can't reach you and put in jail for having bad thoughts.
+      </ul>
+  </details>
   </details>
   <div class="messages">
     {#each messages as message, im}
@@ -380,7 +407,7 @@
         <Fa icon={faPlusLarge} {...faTheme} />
       </button>
       <button on:click={copyMessages} title="Copy messages to clipboard">
-        <Fa icon={faCopy} {...faTheme} flip=horizontal />
+        <Fa icon={faCopy} {...faTheme} flip=vertical />
       </button>
     </div>
   </div>
