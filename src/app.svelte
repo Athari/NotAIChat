@@ -16,6 +16,7 @@
     selectedEndpointIndex: 0,
     selectedProxyIndex: 0,
     multiMessageCount: 10,
+    retryMessageCount: 5,
     density: 'compact',
   };
   let endpoints = [
@@ -156,15 +157,16 @@
     for (let iMessage = 0; iMessage < messageCount; iMessage++) {
       const indexText = messageCount > 1 ? ` (${iMessage + 1}/${messageCount})` : "";
       const timer = performance.now();
+      const getTimeText = () => `${(performance.now() - timer).toFixed(2)} ms`;
       let response;
       try {
         response = await sendRequest(selectedEndpoint);
       }
       catch (ex) {
-        log(`Failed to receive message${indexText}: ${ex.message} (Console and Network tabs in DevTools may contain extra details)`, ex);
+        log(`Failed to receive message${indexText} in ${getTimeText()}: ${ex.message} (Console and Network tabs in DevTools may contain extra details)`, ex);
         continue;
       }
-      const timeText = `${(performance.now() - timer).toFixed(2)} ms`;
+      const timeText = getTimeText();
       if (controller.signal.aborted)
         return;
       else if (response.ok)
@@ -182,7 +184,7 @@
   }
 
   async function sendMessageUntilSuccess(e) {
-    return await sendMessageChunkedInternal(e, +options.multiMessageCount, true);
+    return await sendMessageChunkedInternal(e, +options.retryMessageCount, true);
   }
 
   async function sendMultiMessage(e) {
@@ -310,13 +312,17 @@
           <label for=selectedProxyIndex>Proxy</label>
           <select bind:value={options.selectedProxyIndex} id=selectedProxyIndex>
             <option value={0}>Direct</option>
-            <option value={1}>CORS Demo</option>
+            <option value={1}>CORS demo</option>
             <option value={2}>Web proxy</option>
           </select>
         </div>
         <div class="option">
           <label for=multiMessageCount>Multi-message count</label>
           <input type=text bind:value={options.multiMessageCount} id=multiMessageCount />
+        </div>
+        <div class="option">
+          <label for=retryMessageCount>Retry message count</label>
+          <input type=text bind:value={options.retryMessageCount} id=retryMessageCount />
         </div>
       </div>
     </div>
@@ -329,7 +335,7 @@
       <ul>
         <li><b>Direct</b>:
           <ul>
-            <li><b>User Script</b> <i>(desktop/mobile)</i>:
+            <li><b>User script</b> <i>(desktop/mobile)</i>:
               Install <a href="https://athari.github.io/ScaleChat/userscripts/bypasscors.user.js">Bypass CORS</a> userscript.
               Install <a href="https://www.tampermonkey.net/">TamperMonkey</a> extension or any other user script manager first,
               in case you don't an option to install the script when you click the link.
@@ -343,11 +349,11 @@
               Close all Chrome windows, then run it with <b><code>chrome --no-web-security</code></b> command line.
               This method applies to all websites until you restart Chrome.
           </ul>
-        <li><b>CORS Demo</b> <i>(desktop/mobile)</i>:
+        <li><b>CORS demo</b> <i>(desktop/mobile)</i>:
           Go to <a href="https://cors-anywhere.herokuapp.com/corsdemo">CORS Anywhere Demo</a> page and click on the button to enable it.
           You may be asked to solve CAPTCHA. Note that CORS Demo can timeout way earlier than actual Scale API.
           This method allows all websites using that specific website to bypass CORS.
-        <li><b>Web Proxy</b> <i>(desktop/mobile)</i>:
+        <li><b>Web proxy</b> <i>(desktop/mobile)</i>:
           Use <a href="https://fishtailprotocol.com/projects/betterGPT4/">Web proxy by Feril</a>. No configuration required. This
           method works exclusively with Scale API.
       </ul>
@@ -364,7 +370,7 @@
         <lI>Do not use proxies owned by people you don't trust.
         <li>Do not send any information which could be used to identify you.
         <li>Do register on Scale with fake data, including fake email.
-        <li>Do live in counrties where FBI can't reach you and put in jail for having bad thoughts.
+        <li>Do live in countries where FBI can't reach you and put in jail for having bad thoughts.
       </ul>
   </details>
   </details>
@@ -397,7 +403,7 @@
       <button on:click={e => sendMultiMessage(e)} disabled={isSending} title="Send message and receive {options.multiMessageCount} messages">
         <Fa icon={faRocketLaunch} {...faTheme} />
       </button>
-      <button on:click={e => sendMessageUntilSuccess(e)} disabled={isSending} title="Try sending message {options.multiMessageCount} times">
+      <button on:click={e => sendMessageUntilSuccess(e)} disabled={isSending} title="Try sending message {options.retryMessageCount} times">
         <Fa icon={faTurtle} {...faTheme} />
       </button>
       <button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
