@@ -30,6 +30,9 @@
   ];
   let newMessageText = "";
   let isSending = false;
+  let sendTime = null;
+  let sendTimeText = "";
+  let currentTime = 0;
   let statusText = "Welcome!";
   let controller = null;
   let isLoaded = false;
@@ -39,6 +42,10 @@
   };
   const textAreaHeight = 20;
   const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
+  const secondNumberFormat0 = new Intl.NumberFormat('en-gb',
+    { style: 'unit', unit: 'second', unitDisplay: 'short', maximumFractionDigits: 0 });
+  const millisecondNumberFormat2 = new Intl.NumberFormat('en-gb',
+    { style: 'unit', unit: 'millisecond', unitDisplay: 'short', maximumFractionDigits: 2 });
 
   onMount(() => {
     let newEndpointIndex;
@@ -55,6 +62,10 @@
       options.selectedEndpointIndex = newEndpointIndex;
     isLoaded = true;
     elRoot = document.documentElement;
+    setInterval(() => {
+      if (isSending)
+        currentTime++;
+    }, 1000);
   });
 
   $: {
@@ -68,6 +79,7 @@
   $: elRoot !== null && (o => elRoot.className = `d-${o.density}`)(options);
   $: options.density !== null && updateAllTextAreaSizes();
   $: faTheme = { scale: faThemeScaleMap[options.density] };
+  $: sendTimeText = (() => getTimeText())(currentTime);
 
   function log(message, ...args) {
     console.log(message, ...args);
@@ -193,6 +205,7 @@
   }
 
   async function displayMessage(e, lastMessage, response, extraText) {
+    let httpErrorText = response.ok ? "" : ` (HTTP code: ${response.status}${` ${response.statusText}`.trim()})`
     let json;
     try {
       json = await response.json();
@@ -200,11 +213,13 @@
         json = json.response;
     }
     catch (ex) {
-      log(`Failed to decode message${extraText}: ${ex.message}`, ex);
+      log(`Failed to decode message${extraText}: ${ex.message}${httpErrorText}`, ex);
       return lastMessage;
     }
     if (json.error != null) {
-      log(`Received error${extraText}: ${json.error.code}: ${json.error.message}`);
+      log(`Received error${extraText}: ${json.error.code}: ${json.error.message}${httpErrorText}`);
+    } else if (json.message != null) {
+      log(`Received error${extraText}: ${json.message}${httpErrorText}`);
     } else if (json.output != null) {
       if (lastMessage == null) {
         lastMessage = { id: getNextMessageId(), text: json.output };
@@ -216,7 +231,7 @@
       }
       log(`Received message${extraText}`, json);
     } else {
-      log(`Failed to interpret message${extraText}`, json);
+      log(`Failed to interpret message${extraText}${httpErrorText}`, json);
     }
     return lastMessage;
   }
@@ -232,29 +247,24 @@
     let lastMessage = null;
     for (let iMessage = 0; iMessage < messageCount; iMessage++) {
       const indexText = messageCount > 1 ? ` (${iMessage + 1}/${messageCount})` : "";
-      const timer = performance.now();
-      const getTimeText = () => `${(performance.now() - timer).toFixed(2)} ms`;
+      [ sendTime, currentTime ] = [ performance.now(), 0 ];
       let response;
       try {
         response = await sendRequest(selectedEndpoint);
       }
       catch (ex) {
         if (ex instanceof DOMException && ex.name == 'AbortError') {
-          log(`User cancelled message${indexText} in ${getTimeText()}`, ex);
+          log(`User cancelled message${indexText} in ${getPreciseTimeText()}`, ex);
           return;
         } else {
-          log(`Failed to receive message${indexText} in ${getTimeText()}: ${ex.message} ` +
+          log(`Failed to receive message${indexText} in ${getPreciseTimeText()}: ${ex.message} ` +
             `(Console and Network tabs in DevTools may contain extra details)`, ex);
           continue;
         }
       }
-      const timeText = getTimeText();
       if (controller.signal.aborted)
         break;
-      else if (response.ok)
-        lastMessage = await displayMessage(e, lastMessage, response, `${indexText} in ${timeText}`);
-      else
-        log(`Received HTTP error${indexText} in ${timeText}: ${response.status} ${response.statusText}`);
+      lastMessage = await displayMessage(e, lastMessage, response, `${indexText} in ${getPreciseTimeText()}`);
       if (stopOnFirstSuccess && lastMessage != null)
         break;
     }
@@ -354,6 +364,14 @@
     if (endpoints[options.selectedEndpointIndex] === undefined)
       options.selectedEndpointIndex = null;
     options = { ...options };
+  }
+
+  function getTimeText() {
+    return secondNumberFormat0.format((performance.now() - sendTime) / 1000);
+  }
+
+  function getPreciseTimeText() {
+    return millisecondNumberFormat2.format(performance.now() - sendTime);
   }
 
   function updateTextAreaSize({ target }) {
@@ -554,7 +572,10 @@
       </button>
     </div>
   </div>
-  <p class="status">{statusText}</p>
+  <div class="status">
+    <p class="message">{statusText}</p>
+    <p class="time" style:display={isSending ? 'block' : 'none'}>{sendTimeText}</p>
+  </div>
 </div>
 
 <style lang="less">
@@ -562,6 +583,7 @@
     --button-width: 38px;
     --gap: 8px;
     color-scheme: dark;
+    overflow-wrap: break-word;
     font: 15px/1.2 Segoe UI, sans-serif;
     *,
     *::before,
@@ -661,12 +683,20 @@
     overflow-y: overlay;
   }
   .status {
+    display: flex;
+    flex-flow: row;
     opacity: 0.6;
+    .message {
+      flex: 1;
+    }
+    .time {
+      white-space: nowrap;
+    }
   }
   button {
     height: 26px;
     width: var(--button-width);
-    font: inherit;
+    font-size: 1em;
   }
   p,
   ul {
