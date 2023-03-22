@@ -2,16 +2,18 @@
   'use strict';
   import { onMount } from 'svelte'
   import Fa from 'svelte-fa'
-  import { faPlusLarge } from '@fortawesome/pro-solid-svg-icons/faPlusLarge'
-  import { faXmarkLarge } from '@fortawesome/pro-solid-svg-icons/faXmarkLarge'
-  import { faArrowUp } from '@fortawesome/pro-solid-svg-icons/faArrowUp'
   import { faArrowDown } from '@fortawesome/pro-solid-svg-icons/faArrowDown'
-  import { faPaperPlane } from '@fortawesome/pro-solid-svg-icons/faPaperPlane'
+  import { faArrowUp } from '@fortawesome/pro-solid-svg-icons/faArrowUp'
   import { faBan } from '@fortawesome/pro-solid-svg-icons/faBan'
-  import { faRocketLaunch } from '@fortawesome/pro-regular-svg-icons/faRocketLaunch'
-  import { faTurtle } from '@fortawesome/pro-regular-svg-icons/faTurtle'
   import { faCopy } from '@fortawesome/pro-regular-svg-icons/faCopy'
+  import { faFloppyDisk } from '@fortawesome/pro-regular-svg-icons/faFloppyDisk'
+  import { faFolderOpen } from '@fortawesome/pro-regular-svg-icons/faFolderOpen'
+  import { faPaperPlane } from '@fortawesome/pro-solid-svg-icons/faPaperPlane'
+  import { faPlusLarge } from '@fortawesome/pro-solid-svg-icons/faPlusLarge'
+  import { faRocketLaunch } from '@fortawesome/pro-regular-svg-icons/faRocketLaunch'
   import { faShareNodes } from '@fortawesome/pro-regular-svg-icons/faShareNodes'
+  import { faTurtle } from '@fortawesome/pro-regular-svg-icons/faTurtle'
+  import { faXmarkLarge } from '@fortawesome/pro-solid-svg-icons/faXmarkLarge'
 
   let options = {
     selectedEndpointIndex: 0,
@@ -37,7 +39,7 @@
   };
   const textAreaHeight = 20;
   const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
-  
+
   onMount(() => {
     let newEndpointIndex;
     try {
@@ -66,12 +68,12 @@
   $: elRoot !== null && (o => elRoot.className = `d-${o.density}`)(options);
   $: options.density !== null && updateAllTextAreaSizes();
   $: faTheme = { scale: faThemeScaleMap[options.density] };
-  
+
   function log(message, ...args) {
     console.log(message, ...args);
     statusText = message;
   }
-  
+
   function loadData(id, defaultData) {
     try {
       const data = JSON.parse(localStorage.getItem(id));
@@ -86,13 +88,79 @@
       return defaultData;
     }
   }
-  
+
   function saveData(id, data) {
     try {
       localStorage.setItem(id, JSON.stringify(data));
     } catch (ex) {
       log(`Warning: Failed to save ${id} to localStorage: ${ex.message}`, ex);
     }
+  }
+
+  function getFileNameDate() {
+    return new Date().toISOString().substring(0, 19).replace('T', ' ').replaceAll(':', '-');
+  }
+
+  function backupEndpoints() {
+    downloadFile('application/json', `ScaleChat Endpoints ${getFileNameDate()}.json`,
+      JSON.stringify(endpoints, null, "  "));
+  }
+
+  function backupMessages() {
+    downloadFile('application/json', `ScaleChat Messages ${getFileNameDate()}.json`,
+      JSON.stringify(messages, null, "  "));
+  }
+
+  async function restoreEndpoints() {
+    const json = await uploadFile('.json, application/json');
+    if (json instanceof Array && typeof json[0].key == 'string' && typeof json[0].url == 'string')
+      endpoints = json;
+  }
+
+  async function restoreMessages() {
+    const json = await uploadFile('.json, application/json');
+    if (json instanceof Array && typeof json[0].text == 'string')
+      messages = json;
+  }
+
+  function downloadFile(type, filename, data) {
+    const blob = new Blob([ data ], { type });
+    const elDownloadLink = window.document.createElement('a');
+    elDownloadLink.href = window.URL.createObjectURL(blob);
+    elDownloadLink.download = filename;
+    document.body.appendChild(elDownloadLink);
+    elDownloadLink.click();
+    document.body.removeChild(elDownloadLink);
+  }
+
+  function uploadFile(type) {
+    document.querySelector('#uploadFile')?.remove();
+    document.body.insertAdjacentHTML('beforeEnd', `
+      <input type="file" id="uploadFile" accept="${type}" style="position: absolute; width: 0; height: 0; overflow: hidden" />
+    `);
+    const elUploadFile = document.querySelector('#uploadFile');
+    return new Promise((resolve, reject) => {
+      let isChanged = false;
+      elUploadFile.addEventListener('change', async () => {
+        isChanged = true;
+        try {
+          resolve(JSON.parse(await elUploadFile.files[0].text()));
+        }
+        catch (ex) {
+          reject(ex);
+        }
+        elUploadFile.remove();
+      }, { once: true });
+      window.addEventListener('focus', () => {
+        setTimeout(() => {
+          if (isChanged)
+            return;
+          resolve(null);
+          elUploadFile.remove();
+        }, 300);
+      }, { once: true });
+      elUploadFile.click();
+    });
   }
 
   function getNextMessageId() {
@@ -175,19 +243,20 @@
           log(`User cancelled message${indexText} in ${getTimeText()}`, ex);
           return;
         } else {
-          log(`Failed to receive message${indexText} in ${getTimeText()}: ${ex.message} (Console and Network tabs in DevTools may contain extra details)`, ex);
+          log(`Failed to receive message${indexText} in ${getTimeText()}: ${ex.message} ` +
+            `(Console and Network tabs in DevTools may contain extra details)`, ex);
           continue;
         }
       }
       const timeText = getTimeText();
       if (controller.signal.aborted)
-        return;
+        break;
       else if (response.ok)
         lastMessage = await displayMessage(e, lastMessage, response, `${indexText} in ${timeText}`);
       else
         log(`Received HTTP error${indexText} in ${timeText}: ${response.status} ${response.statusText}`);
       if (stopOnFirstSuccess && lastMessage != null)
-        return;
+        break;
     }
     isSending = false;
   }
@@ -211,7 +280,7 @@
     controller.abort();
     log("Receiving message cancelled");
   }
-  
+
   function addMessage(e) {
     if (newMessageText == "")
       return;
@@ -219,11 +288,11 @@
     newMessageText = "";
     updateMessageTextAreaSize(e);
   }
-  
+
   function deleteMessage(im) {
     messages = messages.filter((m, i) => i !== im);
   }
-  
+
   function swapMessages(im1, im2) {
     if (messages[im1] === undefined || messages[im2] === undefined)
       return;
@@ -233,7 +302,7 @@
 
   async function copyMessages() {
     try {
-      await navigator.clipboard.writeText(messages.map(m => m.text).join("\n")); 
+      await navigator.clipboard.writeText(messages.map(m => m.text).join("\n"));
       log("Messages copied to clipboard");
     } catch (ex) {
       log(`Failed to copy messages to clipboard: ${ex.message}`, ex);
@@ -247,7 +316,7 @@
   function getEndpointPlaceholder() {
     return { name: "Pretty name", key: "KEY", url: "https://dashboard.scale.com/spellbook/api/v2/deploy/URL" };
   }
-  
+
   function addEndpoint() {
     endpoints = [ ...endpoints, getEndpointPlaceholder() ];
   }
@@ -286,7 +355,7 @@
       options.selectedEndpointIndex = null;
     options = { ...options };
   }
-  
+
   function updateTextAreaSize({ target }) {
     const oldPageOffset = window.pageYOffset;
     target.style.height = '0';
@@ -366,6 +435,15 @@
         <div class="option">
           <label for=retryMessageCount>Retry message count</label>
           <input type=text bind:value={options.retryMessageCount} id=retryMessageCount />
+        </div>
+      </div>
+      <h3>Backups</h3>
+      <div class="options">
+        <div class="option-long">
+          <button on:click={backupEndpoints}><Fa icon={faFloppyDisk} {...faTheme} style="margin: 0 8px 0 0" /> Backup endpoints</button>
+          <button on:click={restoreEndpoints}><Fa icon={faFolderOpen} {...faTheme} style="margin: 0 8px 0 0" /> Restore endpoints</button>
+          <button on:click={backupMessages}><Fa icon={faFloppyDisk} {...faTheme} style="margin: 0 8px 0 0" /> Backup messages</button>
+          <button on:click={restoreMessages}><Fa icon={faFolderOpen} {...faTheme} style="margin: 0 8px 0 0" /> Restore messages</button>
         </div>
       </div>
     </div>
@@ -471,7 +549,7 @@
       <button on:click={e => addMessage(e)} disabled={isSending} title="Add message without sending">
         <Fa icon={faPlusLarge} {...faTheme} />
       </button>
-      <button on:click={copyMessages} title="Copy messages to clipboard">
+      <button on:click={copyMessages} title="Copy all messages to clipboard">
         <Fa icon={faCopy} {...faTheme} flip=vertical />
       </button>
     </div>
@@ -547,6 +625,16 @@
       flex: 1;
     }
   }
+  .option-long {
+    display: flex;
+    flex-flow: row wrap;
+    gap: 8px;
+    align-items: center;
+    button {
+      width: auto;
+      padding: 0 12px;
+    }
+  }
   .new-message {
     margin: 12px 0 0 0;
     .buttons {
@@ -578,6 +666,7 @@
   button {
     height: 26px;
     width: var(--button-width);
+    font: inherit;
   }
   p,
   ul {
