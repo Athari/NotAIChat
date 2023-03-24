@@ -48,18 +48,17 @@
     { style: 'unit', unit: 'millisecond', unitDisplay: 'short', maximumFractionDigits: 2 });
 
   onMount(() => {
-    let newEndpointIndex;
-    try {
-      newEndpointIndex = addEndpointFromSearchParams(new URL(location.href).searchParams);
-      if (location.protocol == 'about:')
-        document.querySelector('head style').innerHTML = "";
-    }
-    catch (ex) { /* Loading below must always run */ }
     messages = loadData('messages', messages);
     endpoints = loadData('endpoints', endpoints);
     options = loadData('options', options);
-    if (newEndpointIndex !== null)
-      options.selectedEndpointIndex = newEndpointIndex;
+    try {
+      const newEndpointIndex = addEndpointFromSearchParams(new URLSearchParams(location.search));
+      if (newEndpointIndex !== null)
+        options.selectedEndpointIndex = newEndpointIndex;
+      if (location.protocol == 'about:')
+        document.querySelector('head style').innerHTML = "";
+    }
+    catch (ex) { /* Code below must always run */ }
     isLoaded = true;
     elRoot = document.documentElement;
     setInterval(() => {
