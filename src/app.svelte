@@ -206,15 +206,25 @@
 
   async function displayMessage(e, lastMessage, response, extraText) {
     let httpErrorText = response.ok ? "" : ` (HTTP code: ${response.status}${` ${response.statusText}`.trim()})`
-    let json;
+    let text, json;
     try {
-      json = await response.json();
-      if (json.response != null)
-        json = json.response;
+      text = await response.text();
     }
     catch (ex) {
       log(`Failed to decode message${extraText}: ${ex.message}${httpErrorText}`, ex);
       return lastMessage;
+    }
+    try{
+      json = JSON.parse(text);
+      if (json.response != null)
+        json = json.response;
+    }
+    catch (ex) {
+      if (text.length > 4096) {
+        log(`Failed to parse message${extraText}: ${ex.message}${httpErrorText}`, ex);
+        return lastMessage;
+      }
+      json = { message: text };
     }
     if (json.error != null) {
       log(`Received error${extraText}: ${json.error.code}: ${json.error.message}${httpErrorText}`);
