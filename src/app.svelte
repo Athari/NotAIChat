@@ -422,14 +422,15 @@
   function addEndpointFromSearchParams(params) {
     const endpoint = {
       name: params.get('name') ?? "Shared endpoint",
+      provider: params.get('provider'),
       key: params.get('key'),
       url: params.get('url'),
     };
-    if (endpoint.key == null || endpoint.url == null || endpoints.some(e => e.key == endpoint.key))
-      return null;
     const sameEndpointIndex = endpoints.findIndex(e => e.key == endpoint.key);
     if (sameEndpointIndex != -1)
       return sameEndpointIndex;
+    else if (endpoint.key == null)
+      return null;
     const placeholderKey = getEndpointPlaceholder().key;
     endpoints = [ ...endpoints.filter(e => e.key != placeholderKey), endpoint ];
     return endpoints.length - 1;
@@ -437,7 +438,7 @@
 
   async function shareEndpointLink(ie) {
     const endpoint = endpoints[ie];
-    const searchParams = new URLSearchParams({ name: endpoint.name, key: endpoint.key, url: endpoint.url });
+    const searchParams = new URLSearchParams({ name: endpoint.name, provider: endpoint.provider, key: endpoint.key, url: endpoint.url });
     const urlString = `${location.origin}${location.pathname}?${searchParams}`;
     try {
       await navigator.clipboard.writeText(urlString);
