@@ -114,18 +114,18 @@
   }
 
   function backupEndpoints() {
-    downloadFile('application/json', `ScaleChat Endpoints ${getFileNameDate()}.json`,
+    downloadFile('application/json', `NotAIChat Endpoints ${getFileNameDate()}.json`,
       JSON.stringify(endpoints, null, "  "));
   }
 
   function backupMessages() {
-    downloadFile('application/json', `ScaleChat Messages ${getFileNameDate()}.json`,
+    downloadFile('application/json', `NotAIChat Messages ${getFileNameDate()}.json`,
       JSON.stringify(messages, null, "  "));
   }
 
   async function restoreEndpoints() {
     const json = await uploadFile('.json, application/json');
-    if (json instanceof Array && typeof json[0].key == 'string' && typeof json[0].url == 'string')
+    if (json instanceof Array && typeof json[0].key == 'string')
       endpoints = json;
   }
 
@@ -181,27 +181,105 @@
   }
 
   async function sendRequest(endpoint) {
-    let url = endpoint.url;
-    if (options.selectedProxyIndex == 1)
-      url = `https://cors-anywhere.herokuapp.com/${url}`;
-    else if (options.selectedProxyIndex == 2)
-      url = `https://fishtailprotocol.com/projects/betterGPT4/scale-api.php`;
+    let url;
+    if (endpoint.provider == 'openai') {
+      url = endpoint.url;
+    } else if (endpoint.provider == 'steamship') {
+      url = 'https://api.steamship.com/api/v1/plugin/instance/generate';
+      if (options.selectedProxyIndex == 1)
+        url = `https://cors-anywhere.herokuapp.com/${url}`;
+    } else if (endpoint.provider == 'scale') {
+      url = endpoint.url;
+      if (options.selectedProxyIndex == 1)
+        url = `https://cors-anywhere.herokuapp.com/${url}`;
+      else if (options.selectedProxyIndex == 2)
+        url = `https://fishtailprotocol.com/projects/betterGPT4/scale-api.php`;
+    }
+
     let messageText = messages.map(m => m.text).join("\n");
-    let data = { input: { input: messageText } };
+    let data;
+    if (endpoint.provider == 'openai') {
+      // TODO OpenAI data
+    } else if (endpoint.provider == 'steamship') {
+      data = { appendOutputToFile: false, text: messageText, pluginInstance: endpoint.url };
+    } else if (endpoint.provider == 'scale') {
+      data = { input: { input: messageText } };
+    }
     if (options.selectedProxyIndex == 2)
       data = { OAIToken: endpoint.key, scaleURL: endpoint.url, chatLog: messageText };
-    let headers = {
-      'Content-Type': 'application/json',
-      'Authorization': 'Basic ' + endpoint.key,
-    };
-    if (options.selectedProxyIndex == 2)
-      delete headers.Authorization;
-    return await fetch(url, {
+
+    let headers;
+    if (endpoint.provider == 'openai') {
+      // TODO OpenAI headers
+    } else if (endpoint.provider == 'steamship') {
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${endpoint.key}`,
+        'X-Workspace-Handle': endpoint.url,
+      }
+    } else if (endpoint.provider == 'scale') {
+      headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Basic ' + endpoint.key,
+      };
+      if (options.selectedProxyIndex == 2)
+        delete headers.Authorization;
+    }
+
+    let response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(data),
       signal: controller.signal,
     });
+    if (endpoint.provider == 'openai') {
+      // TODO OpenAI response
+    } else if (endpoint.provider == 'steamship') {
+      let json = await response.json();
+      console.log("SteamShip init: ", json);
+      const { status } = json;
+      if (status != null) {
+        let prevState = '';
+        const { taskId } = status;
+        while (true) {
+          response = await fetch('https://api.steamship.com/api/v1/task/status', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ taskId }),
+            signal: controller.signal,
+          });
+          const responseClone = response.clone();
+          json = await response.json();
+          console.log("SteamShip task:", json.status.state, json);
+          if (json.data != null) {
+            // TODO make sendRequest function return data in consistent JSON format instead of raw Response object
+            json = {
+              role: json.data.blocks[0].tags.filter(t => t.kind == 'role')[0]?.name ?? 'assistant',
+              output: json.data.blocks[0].text,
+            };
+            response = responseClone;
+            response.text = async () => JSON.stringify(json);
+            response.json = async () => json;
+            return response;
+          } else if (json.status.state == 'failed') {
+            json = {
+              message: `${json.status.statusCode}: ${json.status.statusMessage}`,
+            };
+            response = responseClone;
+            response.text = async () => JSON.stringify(json);
+            response.json = async () => json;
+            return response;
+          }
+          if (prevState != json.status.state) {
+            prevState = json.status.state;
+            log(`Sending message (${prevState})`);
+          }
+          await delay(2000);
+        }
+      }
+    } else if (endpoint.provider == 'scale') {
+      return response;
+    }
   }
 
   async function displayMessage(e, lastMessage, response, extraText) {
@@ -334,7 +412,7 @@
   }
 
   function getEndpointPlaceholder() {
-    return { name: "Pretty name", key: "KEY", url: "https://dashboard.scale.com/spellbook/api/v2/deploy/URL" };
+    return { name: "Pretty name", provider: "", key: "", url: "" };
   }
 
   function addEndpoint() {
@@ -374,6 +452,10 @@
     if (endpoints[options.selectedEndpointIndex] === undefined)
       options.selectedEndpointIndex = null;
     options = { ...options };
+  }
+
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   function getTimeText() {
@@ -419,7 +501,7 @@
     <summary>Options</summary>
     <div class="endpoints">
       <h3>
-        Scale Endpoints
+        API Endpoints
         <button on:click={addEndpoint} title="Add endpoint">
           <Fa icon={faPlusLarge} {...faTheme} />
         </button>
@@ -428,6 +510,12 @@
         <div class="endpoint">
           <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
           <input type=text bind:value={endpoint.name} placeholder="Display name">
+          <select bind:value={endpoint.provider} placeholder="Provider">
+            <option value={''}></option>
+            <option value={'openai'}>OpenAI</option>
+            <option value={'steamship'}>SteamShip</option>
+            <option value={'scale'}>Scale</option>
+          </select>
           <input type=text bind:value={endpoint.key} placeholder="API Key">
           <input type=text bind:value={endpoint.url} placeholder="Endpoint URL">
           <button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
@@ -516,7 +604,7 @@
           </ul>
         <li><b>CORS demo</b> <i>(desktop/mobile)</i>:
           Go to <a href="https://cors-anywhere.herokuapp.com/corsdemo">CORS Anywhere Demo</a> page and click on the button to enable it.
-          You may be asked to solve CAPTCHA. Note that CORS Demo can timeout way earlier than actual Scale API.
+          You may be asked to solve CAPTCHA. Note that CORS Demo can timeout way earlier than actual API.
           This method allows all websites using that specific website to bypass CORS.
         <li><b>Web proxy</b> <i>(desktop/mobile)</i>:
           Use <a href="https://fishtailprotocol.com/projects/betterGPT4/">Web proxy by Feril</a>. No configuration required. This
