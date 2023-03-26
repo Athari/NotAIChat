@@ -1,7 +1,10 @@
 <script>
   'use strict';
+
   import { onMount } from 'svelte'
   import Fa from 'svelte-fa'
+  import { loadData, saveData, downloadFile, uploadFile } from './utils'
+  import { AIConnectionFactory } from './providers'
   import { faArrowDown } from '@fortawesome/pro-solid-svg-icons/faArrowDown'
   import { faArrowUp } from '@fortawesome/pro-solid-svg-icons/faArrowUp'
   import { faBan } from '@fortawesome/pro-solid-svg-icons/faBan'
@@ -15,6 +18,8 @@
   import { faTurtle } from '@fortawesome/pro-regular-svg-icons/faTurtle'
   import { faXmarkLarge } from '@fortawesome/pro-solid-svg-icons/faXmarkLarge'
 
+  AIConnectionFactory.init();
+
   let options = {
     selectedEndpointIndex: 0,
     selectedProxyIndex: 0,
@@ -22,12 +27,9 @@
     retryMessageCount: 5,
     density: 'compact',
   };
-  let endpoints = [
-    getEndpointPlaceholder()
-  ];
-  let messages = [
-    { id: 1, text: "Hello GPT-4!" },
-  ];
+  let endpoints = [ AIConnectionFactory.createDefaultProviderConfig() ];
+  let proxies = [ AIConnectionFactory.createDefaultProxyConfig() ];
+  let messages = [ { id: 1, text: "Hello GPT-4!" } ];
   let newMessageText = "";
   let isSending = false;
   let sendTime = null;
@@ -49,6 +51,7 @@
   onMount(() => {
     messages = loadData('messages', messages);
     endpoints = loadData('endpoints', endpoints);
+    proxies = loadData('proxies', proxies);
     options = loadData('options', options);
     try {
       const newEndpointIndex = addEndpointFromSearchParams(new URLSearchParams(location.search));
@@ -72,6 +75,7 @@
     if (isLoaded) {
       saveData('messages', messages);
       saveData('endpoints', endpoints);
+      saveData('proxies', proxies);
       saveData('options', options);
     }
   }
@@ -87,46 +91,37 @@
     statusText = message;
   }
 
-  function loadData(id, defaultData) {
-    try {
-      const data = JSON.parse(localStorage.getItem(id));
-      return data !== null &&
-        typeof data === typeof defaultData &&
-        data.constructor.name === defaultData.constructor.name ?
-          data.constructor.name === 'Object' ?
-            Object.assign(defaultData, data) :
-            data : defaultData;
-    } catch (ex) {
-      log(`Warning: Failed to load ${id} from localStorage: ${ex.message}`, ex);
-      return defaultData;
-    }
-  }
-
-  function saveData(id, data) {
-    try {
-      localStorage.setItem(id, JSON.stringify(data));
-    } catch (ex) {
-      log(`Warning: Failed to save ${id} to localStorage: ${ex.message}`, ex);
-    }
-  }
-
   function getFileNameDate() {
     return new Date().toISOString().substring(0, 19).replace('T', ' ').replaceAll(':', '-');
   }
 
   function saveEndpoints() {
-    downloadFile('application/json', `NotAIChat Endpoints ${getFileNameDate()}.json`,
-      JSON.stringify(endpoints, null, "  "));
+    downloadChatJsonFile("Endpoints", endpoints);
+  }
+
+  function saveProxies() {
+    downloadChatJsonFile("Proxies", proxies);
   }
 
   function saveMessages() {
-    downloadFile('application/json', `NotAIChat Messages ${getFileNameDate()}.json`,
-      JSON.stringify(messages, null, "  "));
+    downloadChatJsonFile("Messages", messages);
   }
+
+  function downloadChatJsonFile(fileName, data) {
+    downloadFile('application/json', `NotAIChat ${fileName} ${getFileNameDate()}.json`,
+      JSON.stringify(data, null, "  "));
+  }  
 
   async function loadEndpoints(isAppend) {
     const json = await uploadFile('.json, application/json');
-    if (!(json instanceof Array && typeof json[0].key == 'string'))
+    if (!(json instanceof Array && typeof json[0].typeId == 'string'))
+      return;
+    endpoints = isAppend ? [ ...endpoints, ...json ] : json;
+  }
+
+  async function loadProxies(isAppend) {
+    const json = await uploadFile('.json, application/json');
+    if (!(json instanceof Array && typeof json[0].typeId == 'string'))
       return;
     endpoints = isAppend ? [ ...endpoints, ...json ] : json;
   }
@@ -138,175 +133,12 @@
     messages = isAppend ? [ ...messages, ...json ] : json;
   }
 
-  function downloadFile(type, filename, data) {
-    const blob = new Blob([ data ], { type });
-    const elDownloadLink = window.document.createElement('a');
-    elDownloadLink.href = window.URL.createObjectURL(blob);
-    elDownloadLink.download = filename;
-    document.body.appendChild(elDownloadLink);
-    elDownloadLink.click();
-    document.body.removeChild(elDownloadLink);
-  }
-
-  function uploadFile(type) {
-    document.querySelector('#uploadFile')?.remove();
-    document.body.insertAdjacentHTML('beforeEnd', `
-      <input type="file" id="uploadFile" accept="${type}" style="position: absolute; width: 0; height: 0; overflow: hidden" />
-    `);
-    const elUploadFile = document.querySelector('#uploadFile');
-    return new Promise((resolve, reject) => {
-      let isChanged = false;
-      elUploadFile.addEventListener('change', async () => {
-        isChanged = true;
-        try {
-          resolve(JSON.parse(await elUploadFile.files[0].text()));
-        }
-        catch (ex) {
-          reject(ex);
-        }
-        elUploadFile.remove();
-      }, { once: true });
-      window.addEventListener('focus', () => {
-        setTimeout(() => {
-          if (isChanged)
-            return;
-          resolve(null);
-          elUploadFile.remove();
-        }, 300);
-      }, { once: true });
-      elUploadFile.click();
-    });
-  }
-
   function getNextMessageId() {
     const currentMaxId = Math.max(...messages.map(m => m.id));
     return Number.isFinite(currentMaxId) ? currentMaxId + 1 : 1;
   }
 
-  async function sendRequest(endpoint) {
-    let url;
-    if (endpoint.provider == 'openai') {
-      url = endpoint.url;
-    } else if (endpoint.provider == 'steamship') {
-      url = 'https://api.steamship.com/api/v1/plugin/instance/generate';
-      if (options.selectedProxyIndex == 1)
-        url = `https://cors-anywhere.herokuapp.com/${url}`;
-    } else if (endpoint.provider == 'scale') {
-      url = endpoint.url;
-      if (options.selectedProxyIndex == 1)
-        url = `https://cors-anywhere.herokuapp.com/${url}`;
-      else if (options.selectedProxyIndex == 2)
-        url = `https://fishtailprotocol.com/projects/betterGPT4/scale-api.php`;
-    }
-
-    let messageText = messages.map(m => m.text).join("\n");
-    let data;
-    if (endpoint.provider == 'openai') {
-      // TODO OpenAI data
-    } else if (endpoint.provider == 'steamship') {
-      data = { appendOutputToFile: false, text: messageText, pluginInstance: endpoint.url };
-    } else if (endpoint.provider == 'scale') {
-      data = { input: { input: messageText } };
-    }
-    if (options.selectedProxyIndex == 2)
-      data = { OAIToken: endpoint.key, scaleURL: endpoint.url, chatLog: messageText };
-
-    let headers;
-    if (endpoint.provider == 'openai') {
-      // TODO OpenAI headers
-    } else if (endpoint.provider == 'steamship') {
-      headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${endpoint.key}`,
-        'X-Workspace-Handle': endpoint.url,
-      }
-    } else if (endpoint.provider == 'scale') {
-      headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Basic ' + endpoint.key,
-      };
-      if (options.selectedProxyIndex == 2)
-        delete headers.Authorization;
-    }
-
-    let response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(data),
-      signal: controller.signal,
-    });
-    if (endpoint.provider == 'openai') {
-      // TODO OpenAI response
-    } else if (endpoint.provider == 'steamship') {
-      let json = await response.json();
-      console.log("SteamShip init: ", json);
-      const { status } = json;
-      if (status != null) {
-        let prevState = '';
-        const { taskId } = status;
-        while (true) {
-          response = await fetch('https://api.steamship.com/api/v1/task/status', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ taskId }),
-            signal: controller.signal,
-          });
-          const responseClone = response.clone();
-          json = await response.json();
-          console.log("SteamShip task:", json.status.state, json);
-          if (json.data != null) {
-            // TODO make sendRequest function return data in consistent JSON format instead of raw Response object
-            json = {
-              role: json.data.blocks[0].tags.filter(t => t.kind == 'role')[0]?.name ?? 'assistant',
-              output: json.data.blocks[0].text,
-            };
-            response = responseClone;
-            response.text = async () => JSON.stringify(json);
-            response.json = async () => json;
-            return response;
-          } else if (json.status.state == 'failed') {
-            json = {
-              message: `${json.status.statusCode}: ${json.status.statusMessage}`,
-            };
-            response = responseClone;
-            response.text = async () => JSON.stringify(json);
-            response.json = async () => json;
-            return response;
-          }
-          if (prevState != json.status.state) {
-            prevState = json.status.state;
-            log(`Sending message (${prevState})`);
-          }
-          await delay(2000);
-        }
-      }
-    } else if (endpoint.provider == 'scale') {
-      return response;
-    }
-  }
-
   async function displayMessage(e, lastMessage, response, extraText) {
-    let httpErrorText = response.ok ? "" : ` (HTTP code: ${response.status}${` ${response.statusText}`.trim()})`
-    let text, json;
-    try {
-      text = await response.text();
-    }
-    catch (ex) {
-      log(`Failed to decode message${extraText}: ${ex.message}${httpErrorText}`, ex);
-      return lastMessage;
-    }
-    try{
-      json = JSON.parse(text);
-      if (json.response != null)
-        json = json.response;
-    }
-    catch (ex) {
-      if (text.length > 4096) {
-        log(`Failed to parse message${extraText}: ${ex.message}${httpErrorText}`, ex);
-        return lastMessage;
-      }
-      json = { message: text };
-    }
     if (json.error != null) {
       log(`Received error${extraText}: ${json.error.code}: ${json.error.message}${httpErrorText}`);
     } else if (json.message != null) {
@@ -327,51 +159,77 @@
     return lastMessage;
   }
 
-  async function sendMessageChunkedInternal(e, messageCount, stopOnFirstSuccess) {
+  async function sendMessageInternal(e, messageCount, stopOnFirstSuccess) {
     log("Sending message");
     addMessage({ target: e.target });
     isSending = true;
-    const selectedEndpoint = endpoints[options.selectedEndpointIndex];
-    if (selectedEndpoint == null)
-      throw new Error("No endpoint selected");
+    const api = AIConnectionFactory.createConnection(
+      endpoints[options.selectedEndpointIndex],
+      proxies[options.selectedProxyIndex]);
+    if (api == null) {
+      log("No endpoint selected");
+      return;
+    }
+
     controller = new AbortController();
     let lastMessage = null;
+    let indexText;
+    const state = {
+      get signal() { return controller.signal },
+      get extraText() { return `${indexText} in ${getPreciseTimeText()}` },
+      get messages() { return messages },
+    };
+    Object.assign(api, {
+      onMessage(message) {
+        if (lastMessage == null) {
+          lastMessage = { id: getNextMessageId(), text: message.text, role: message.role };
+          messages = [ ...messages, lastMessage ];
+        } else {
+          lastMessage.text += ` ${message.text}`;
+          messages = [ ...messages ];
+          updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
+        }
+        log(`Received message${state.extraText}`, message);
+      },
+      onLogMessage(logMessage) {
+        log(logMessage.text);
+      },
+      onError(error) {
+        log(error.text, error.error);
+      },
+    });
     for (let iMessage = 0; iMessage < messageCount; iMessage++) {
-      const indexText = messageCount > 1 ? ` (${iMessage + 1}/${messageCount})` : "";
+      indexText = messageCount > 1 ? ` (${iMessage + 1}/${messageCount})` : "";
       [ sendTime, currentTime ] = [ performance.now(), 0 ];
-      let response;
       try {
-        response = await sendRequest(selectedEndpoint);
+        await api.sendRequest(state);
       }
       catch (ex) {
         if (ex instanceof DOMException && ex.name == 'AbortError') {
-          log(`User cancelled message${indexText} in ${getPreciseTimeText()}`, ex);
+          log(`User cancelled message${state.extraText}`, ex);
           return;
         } else {
-          log(`Failed to receive message${indexText} in ${getPreciseTimeText()}: ${ex.message} ` +
+          log(`Unexpected error${state.extraText}: ${ex.message} ` +
             `(Console and Network tabs in DevTools may contain extra details)`, ex);
           continue;
         }
       }
-      if (controller.signal.aborted)
-        break;
-      lastMessage = await displayMessage(e, lastMessage, response, `${indexText} in ${getPreciseTimeText()}`);
-      if (stopOnFirstSuccess && lastMessage != null)
+      if (controller.signal.aborted || (stopOnFirstSuccess && lastMessage != null))
         break;
     }
     isSending = false;
   }
 
   async function sendMessage(e) {
-    return await sendMessageChunkedInternal(e, 1, false);
+    return await sendMessageInternal(e, 1, false);
   }
 
   async function sendMessageUntilSuccess(e) {
-    return await sendMessageChunkedInternal(e, +options.retryMessageCount, true);
+    return await sendMessageInternal(e, +options.retryMessageCount, true);
   }
 
   async function sendMultiMessage(e) {
-    return await sendMessageChunkedInternal(e, +options.multiMessageCount, false);
+    return await sendMessageInternal(e, +options.multiMessageCount, false);
   }
 
   function stopMessage() {
@@ -414,12 +272,8 @@
     updateTextAreaSizeDelayed({ target: e.target.closest('.message').querySelector('textarea') });
   }
 
-  function getEndpointPlaceholder() {
-    return { name: "Pretty name", provider: "", key: "", url: "" };
-  }
-
   function addEndpoint() {
-    endpoints = [ ...endpoints, getEndpointPlaceholder() ];
+    endpoints = [ ...endpoints, AIConnectionFactory.createDefaultProviderConfig() ];
   }
 
   function addEndpointFromSearchParams(params) {
@@ -434,7 +288,7 @@
       return sameEndpointIndex;
     else if (endpoint.key == null)
       return null;
-    const placeholderKey = getEndpointPlaceholder().key;
+    const placeholderKey = AIConnectionFactory.createDefaultProviderConfig().key;
     endpoints = [ ...endpoints.filter(e => e.key != placeholderKey), endpoint ];
     return endpoints.length - 1;
   }
@@ -455,11 +309,16 @@
     endpoints = endpoints.filter((e, i) => i !== ie);
     if (endpoints[options.selectedEndpointIndex] === undefined)
       options.selectedEndpointIndex = null;
-    options = { ...options };
   }
 
-  function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+  function addProxy() {
+    proxies = [ ...proxies, AIConnectionFactory.createDefaultProxyConfig() ];
+  }
+
+  function deleteProxy(ip) {
+    proxies = proxies.filter((p, i) => i !== ip);
+    if (proxies[options.selectedProxyIndex] === undefined)
+      options.selectedProxyIndex = null;
   }
 
   function getTimeText() {
@@ -514,18 +373,58 @@
         <div class="endpoint">
           <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
           <input type=text bind:value={endpoint.name} placeholder="Display name">
-          <select bind:value={endpoint.provider} placeholder="Provider">
-            <option value={''}></option>
-            <option value={'openai'}>OpenAI</option>
-            <option value={'steamship'}>SteamShip</option>
-            <option value={'scale'}>Scale</option>
+          <select bind:value={endpoint.typeId} placeholder="Provider">
+            {#each AIConnectionFactory.providers as provider}
+              <option value={provider.id}>{provider.displayName}</option>  
+            {/each}
           </select>
-          <input type=text bind:value={endpoint.key} placeholder="API Key">
-          <input type=text bind:value={endpoint.url} placeholder="Endpoint URL">
+          {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat'}
+              <input type=text bind:value={endpoint.key} placeholder="API Key">
+              <input type=text bind:value={endpoint.url} placeholder="Base URL">
+            {:else if provider.id == 'steamship-plugin'}
+              <input type=text bind:value={endpoint.key} placeholder="API Key">
+              <input type=text bind:value={endpoint.workspace} placeholder="Workspace">
+            {:else if provider.id == 'scale-spellbook' || provider.id == 'scale-spellbook-fish'}
+              <input type=text bind:value={endpoint.key} placeholder="Deployment Key">
+              <input type=text bind:value={endpoint.url} placeholder="Deployment URL">
+            {:else}
+              <b>Choose endpoint provider</b>
+            {/if}
+          {/await}
           <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
             <Fa icon={faShareNodes} {...faTheme} />
           </button>
           <button type=button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
+            <Fa icon={faXmarkLarge} {...faTheme} />
+          </button>
+        </div>
+      {/each}
+      <h3>
+        Proxies
+        <button on:click={addProxy} title="Add proxy">
+          <Fa icon={faPlusLarge} {...faTheme} />
+        </button>
+      </h3>
+      {#each proxies as proxy, ip}
+        <div class="endpoint">
+          <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set proxy as current">
+          <input type=text bind:value={proxy.name} placeholder="Display name">
+          <select bind:value={proxy.typeId} placeholder="Provider">
+            {#each AIConnectionFactory.proxies as proxy}
+              <option value={proxy.id}>{proxy.displayName}</option>  
+            {/each}
+          </select>
+          {#await AIConnectionFactory.getProxy(proxy.typeId) then provider}
+            {#if provider.id == 'cors-anywhere'}
+              <input type=text bind:value={proxy.url} placeholder="Proxy URL">
+            {:else if provider.id == ''}
+              <b>No options</b>
+            {:else}
+              <b>Choose proxy provider</b>
+            {/if}
+          {/await}
+          <button type=button on:click={() => deleteProxy(ip)} title="Delete proxy">
             <Fa icon={faXmarkLarge} {...faTheme} />
           </button>
         </div>
@@ -538,14 +437,6 @@
             <option value={'compact'}>Compact</option>
             <option value={'mobile'}>Comfortable</option>
             <option value={'access'}>Accessible</option>
-          </select>
-        </div>
-        <div class="option">
-          <label for=selectedProxyIndex>Proxy</label>
-          <select bind:value={options.selectedProxyIndex} id=selectedProxyIndex>
-            <option value={0}>Direct</option>
-            <option value={1}>CORS demo</option>
-            <option value={2}>Web proxy</option>
           </select>
         </div>
         <div class="option">
@@ -762,11 +653,13 @@
   .buttons {
     display: flex;
     flex-flow: row;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
   }
+  .message {
+    align-items: flex-start;
+  }
   .option {
-    align-items: center;
     width: 400px;
     label {
       flex: 1;
