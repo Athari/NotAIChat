@@ -37,9 +37,8 @@
   let controller = null;
   let isLoaded = false;
   let elRoot = null;
-  let faTheme = {
-    scale: 1.3,
-  };
+  let faTheme = { scale: 1.3 };
+  let faThemeWithLabel = Object.assign({}, faTheme);
   const textAreaHeight = 20;
   const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
   const secondNumberFormat0 = new Intl.NumberFormat('en-gb',
@@ -58,7 +57,9 @@
       if (location.protocol == 'about:')
         document.querySelector('head style').innerHTML = "";
     }
-    catch (ex) { /* Code below must always run */ }
+    catch (ex) {
+      console.log(ex);
+    }
     isLoaded = true;
     elRoot = document.documentElement;
     setInterval(() => {
@@ -78,6 +79,7 @@
   $: elRoot !== null && (o => elRoot.className = `d-${o.density}`)(options);
   $: options.density !== null && updateAllTextAreaSizes();
   $: faTheme = { scale: faThemeScaleMap[options.density] };
+  $: faThemeWithLabel = Object.assign({}, faTheme, { style: "margin: 0 calc(var(--gap) * 1.5) 0 calc(var(--gap) * 0.5)" })
   $: sendTimeText = (() => getTimeText())(currentTime);
 
   function log(message, ...args) {
@@ -112,26 +114,28 @@
     return new Date().toISOString().substring(0, 19).replace('T', ' ').replaceAll(':', '-');
   }
 
-  function backupEndpoints() {
+  function saveEndpoints() {
     downloadFile('application/json', `NotAIChat Endpoints ${getFileNameDate()}.json`,
       JSON.stringify(endpoints, null, "  "));
   }
 
-  function backupMessages() {
+  function saveMessages() {
     downloadFile('application/json', `NotAIChat Messages ${getFileNameDate()}.json`,
       JSON.stringify(messages, null, "  "));
   }
 
-  async function restoreEndpoints() {
+  async function loadEndpoints(isAppend) {
     const json = await uploadFile('.json, application/json');
-    if (json instanceof Array && typeof json[0].key == 'string')
-      endpoints = json;
+    if (!(json instanceof Array && typeof json[0].key == 'string'))
+      return;
+    endpoints = isAppend ? [ ...endpoints, ...json ] : json;
   }
 
-  async function restoreMessages() {
+  async function loadMessages(isAppend) {
     const json = await uploadFile('.json, application/json');
-    if (json instanceof Array && typeof json[0].text == 'string')
-      messages = json;
+    if (!(json instanceof Array && typeof json[0].text == 'string'))
+      return;
+    messages = isAppend ? [ ...messages, ...json ] : json;
   }
 
   function downloadFile(type, filename, data) {
@@ -518,10 +522,10 @@
           </select>
           <input type=text bind:value={endpoint.key} placeholder="API Key">
           <input type=text bind:value={endpoint.url} placeholder="Endpoint URL">
-          <button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
+          <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
             <Fa icon={faShareNodes} {...faTheme} />
           </button>
-          <button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
+          <button type=button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
             <Fa icon={faXmarkLarge} {...faTheme} />
           </button>
         </div>
@@ -556,10 +560,28 @@
       <h3>Backups</h3>
       <div class="options">
         <div class="option-long">
-          <button on:click={backupEndpoints}><Fa icon={faFloppyDisk} {...faTheme} style="margin: 0 8px 0 0" /> Backup endpoints</button>
-          <button on:click={restoreEndpoints}><Fa icon={faFolderOpen} {...faTheme} style="margin: 0 8px 0 0" /> Restore endpoints</button>
-          <button on:click={backupMessages}><Fa icon={faFloppyDisk} {...faTheme} style="margin: 0 8px 0 0" /> Backup messages</button>
-          <button on:click={restoreMessages}><Fa icon={faFolderOpen} {...faTheme} style="margin: 0 8px 0 0" /> Restore messages</button>
+          <header>Endpoints</header>
+          <button type=button on:click={() => loadEndpoints(false)}>
+            <Fa icon={faFolderOpen} {...faThemeWithLabel} />Load
+          </button>
+          <button type=button on:click={() => loadEndpoints(true)}>
+            <Fa icon={faFolderOpen} {...faThemeWithLabel} />Append
+          </button>
+          <button type=button on:click={() => saveEndpoints()}>
+            <Fa icon={faFloppyDisk} {...faThemeWithLabel} />Save
+          </button>
+        </div>
+        <div class="option-long">
+          <header>Messages</header>
+          <button type=button on:click={() => loadMessages(false)}>
+            <Fa icon={faFolderOpen} {...faThemeWithLabel} />Load
+          </button>
+          <button type=button on:click={() => loadMessages(true)}>
+            <Fa icon={faFolderOpen} {...faThemeWithLabel} />Append
+          </button>
+          <button type=button on:click={() => saveMessages()}>
+            <Fa icon={faFloppyDisk} {...faThemeWithLabel} />Save
+          </button>
         </div>
       </div>
     </div>
@@ -636,10 +658,10 @@
           <button on:click={() => swapMessages(im, im - 1)} disabled={im <= 0} title="Move message up">
             <Fa icon={faArrowUp} {...faTheme} />
           </button>
-          <button on:click={() => swapMessages(im, im + 1)} disabled={im >= messages.length - 1} title="Move message down">
+          <button type=button on:click={() => swapMessages(im, im + 1)} disabled={im >= messages.length - 1} title="Move message down">
             <Fa icon={faArrowDown} {...faTheme} />
           </button>
-          <button on:click={() => deleteMessage(im)} title="Delete message">
+          <button type=button on:click={() => deleteMessage(im)} title="Delete message">
             <Fa icon={faXmarkLarge} {...faTheme} />
           </button>
         </div>
@@ -650,22 +672,22 @@
     <textarea bind:value={newMessageText} disabled={isSending} placeholder="New message text"
               autocomplete=false use:autoResizeTextArea></textarea>
     <div class="buttons">
-      <button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
+      <button type=button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
         <Fa icon={faPaperPlane} {...faTheme} />
       </button>
-      <button on:click={e => sendMultiMessage(e)} disabled={isSending} title="Send message and receive {options.multiMessageCount} messages">
+      <button type=button on:click={e => sendMultiMessage(e)} disabled={isSending} title="Send message and receive {options.multiMessageCount} messages">
         <Fa icon={faRocketLaunch} {...faTheme} />
       </button>
-      <button on:click={e => sendMessageUntilSuccess(e)} disabled={isSending} title="Try sending message {options.retryMessageCount} times">
+      <button type=button on:click={e => sendMessageUntilSuccess(e)} disabled={isSending} title="Try sending message {options.retryMessageCount} times">
         <Fa icon={faTurtle} {...faTheme} />
       </button>
-      <button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
+      <button type=button on:click={stopMessage} disabled={!isSending} title="Cancel sending">
         <Fa icon={faBan} {...faTheme} />
       </button>
-      <button on:click={e => addMessage(e)} disabled={isSending} title="Add message without sending">
+      <button type=button on:click={e => addMessage(e)} disabled={isSending} title="Add message without sending">
         <Fa icon={faPlusLarge} {...faTheme} />
       </button>
-      <button on:click={copyMessages} title="Copy all messages to clipboard">
+      <button type=button on:click={copyMessages} title="Copy all messages to clipboard">
         <Fa icon={faCopy} {...faTheme} flip=vertical />
       </button>
     </div>
@@ -717,6 +739,11 @@
     font-weight: 500;
     font-size: 1.2em;
     margin: 2px 0;
+  }
+  header {
+    font: inherit;
+    font-weight: 400;
+    margin: 0;
   }
   .messages,
   .endpoints,
