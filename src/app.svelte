@@ -27,6 +27,7 @@
     retryMessageCount: 5,
     density: 'compact',
   };
+
   let endpoints = [ AIConnectionFactory.createDefaultProviderConfig() ];
   let proxies = [ AIConnectionFactory.createDefaultProxyConfig() ];
   let messages = [ { id: 1, text: "Hello GPT-4!" } ];
@@ -38,9 +39,14 @@
   let statusText = "Welcome!";
   let controller = null;
   let isLoaded = false;
+  
+  let selectedEndpoint = null;
+  let selectedProxy = null;
   let elRoot = null;
   let faTheme = { scale: 1.3 };
   let faThemeWithLabel = Object.assign({}, faTheme);
+  
+  const messageRoles = [ 'system', 'user', 'assistant' ];
   const textAreaHeight = 20;
   const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
   const secondNumberFormat0 = new Intl.NumberFormat('en-gb',
@@ -85,6 +91,8 @@
   $: faTheme = { scale: faThemeScaleMap[options.density] };
   $: faThemeWithLabel = Object.assign({}, faTheme, { style: "margin: 0 calc(var(--gap) * 1.5) 0 calc(var(--gap) * 0.5)" })
   $: sendTimeText = (() => getTimeText())(currentTime);
+  $: selectedEndpoint = endpoints[options.selectedEndpointIndex];
+  $: selectedProxy = endpoints[options.selectedProxyIndex];
 
   function log(message, ...args) {
     console.log(message, ...args);
@@ -163,9 +171,7 @@
     log("Sending message");
     addMessage({ target: e.target });
     isSending = true;
-    const api = AIConnectionFactory.createConnection(
-      endpoints[options.selectedEndpointIndex],
-      proxies[options.selectedProxyIndex]);
+    const api = AIConnectionFactory.createConnection(selectedEndpoint, selectedProxy);
     if (api == null) {
       log("No endpoint selected");
       return;
@@ -192,7 +198,10 @@
         log(`Received message${state.extraText}`, message);
       },
       onLogMessage(logMessage) {
-        log(logMessage.text);
+        if (logMessage.data)
+          log(logMessage.text, ...logMessage.data);
+        else
+          log(logMessage.text);
       },
       onError(error) {
         log(error.text, error.error);
@@ -379,7 +388,7 @@
             {/each}
           </select>
           {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat'}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit'}
               <input type=text bind:value={endpoint.key} placeholder="API Key">
               <input type=text bind:value={endpoint.url} placeholder="Base URL">
             {:else if provider.id == 'steamship-plugin'}
@@ -390,6 +399,9 @@
               <input type=text bind:value={endpoint.url} placeholder="Deployment URL">
             {:else}
               <b>Choose endpoint provider</b>
+            {/if}
+            {#if provider.models.length > 0}
+              <input type=text bind:value={endpoint.model} placeholder="Model name" list="{provider.id}-models">
             {/if}
           {/await}
           <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
@@ -543,6 +555,7 @@
   <div class="messages">
     {#each messages as message, im}
       <div class="message">
+        <input type=text bind:value={message.role} list=messageRole placeholder="Role" />
         <textarea bind:value={message.text} placeholder="Message #{message.id} text"
                   autocomplete=false use:autoResizeTextArea></textarea>
         <div class="buttons">
@@ -587,6 +600,18 @@
     <p class="message">{statusText}</p>
     <p class="time" style:display={isSending ? 'block' : 'none'}>{sendTimeText}</p>
   </div>
+  <datalist id=messageRole>
+    {#each AIConnectionFactory.getProvider(selectedEndpoint?.typeId).messageRoles as messageRole}
+      <option value={messageRole}>{messageRole}</option>
+    {/each}
+  </datalist>
+  {#each AIConnectionFactory.providers.filter(p => p.models.length > 0) as provider}
+    <datalist id="{provider.id}-models">
+      {#each provider.models as model}
+        <option value={model}>{model}</option>
+      {/each}
+    </datalist>
+  {/each}
 </div>
 
 <style lang="less">
@@ -658,6 +683,9 @@
   }
   .message {
     align-items: flex-start;
+    input[type=text][list] {
+      flex: 0 0 120px;
+    }
   }
   .option {
     width: 400px;
