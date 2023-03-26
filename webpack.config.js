@@ -42,7 +42,8 @@ module.exports = {
               less: true,
             }),
             compilerOptions: {
-              cssHash: ({ hash, name, filename, css }) => `s-${cssHashMap[name] ?? hash(filename)}`,
+              //cssHash: ({ hash, name, filename, css }) => `s-${cssHashMap[name] ?? hash(filename)}`,
+              cssHash: ({ hash, name, filename, css }) => cssHashMap[name] ?? hash(filename),
             },
           },
         },
@@ -113,7 +114,7 @@ module.exports = {
                     html = `${html.substring(0, start)}<style>${inlineStyle}</style>${html.substring(end)}`;
                     compilation.deleteAsset(styleName);
                   }
-                  html = html.replace(/ +/ig, " ");
+                  html = html.replace(/ +/ig, " ").replace(/(\\r)?\\n /g, " ").replace(/\\n <\//g, "</");
                   compilation.updateAsset(name, new webpack.sources.RawSource(html));
                 }
               }
