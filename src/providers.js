@@ -1,6 +1,6 @@
 'use strict'
 
-import { delay } from './utils'
+import { delay, timeout, generateUuid } from './utils'
 
 export class AIConnectionFactory {
   static providers = [];
@@ -24,14 +24,13 @@ export class AIConnectionFactory {
         {}, [], [],
       ),
       new AIConnectionFactory(
-        'openai-text', "OpenAI Text", OpenAITextProvider,
-        { key: "", url: "", model: "" },
-        [],
+        'openai-text', "OpenAI Text (TODO)", OpenAITextProvider,
+        { key: "", url: "", model: "", stream: false }, [],
         [ 'text-davinci-003', 'text-davinci-002', 'davinci' ],
       ),
       new AIConnectionFactory(
-        'openai-chat', "OpenAI Chat", OpenAIChatProvider,
-        { key: "", url: "", model: "" },
+        'openai-chat', "OpenAI Chat (TODO)", OpenAIChatProvider,
+        { key: "", url: "", model: "", stream: false },
         [ 'user', 'assistant', 'system' ],
         [ 'gpt-4', 'gpt-4-32k', 'gpt-3.5-turbo' ],
       ),
@@ -50,7 +49,7 @@ export class AIConnectionFactory {
       ),
       new AIConnectionFactory(
         'chatbotkit', "ChatBotKit", ChatBotKitProvider,
-        { key: "", url: "", model: "" },
+        { key: "", url: "", model: "", stream: false },
         [ 'user', 'bot', 'context', 'instruction', 'backstory' ],
         [ 'gpt-4', 'gbt-3.5-turbo', 'text-davinci-003', 'text-davinci-002', 'text-algo-003', 'text-algo-002', 'text-algo-001' ],
       ),
@@ -116,6 +115,12 @@ export class AIProvider {
     return { error: "Provider not implemented" };
   }
 
+  async fetch(input, init) {
+    const response = await fetch(input, init);
+    console.log("Received HTTP response:", response, "headers:", [ ...response.headers.values() ]);
+    return response;
+  }
+
   async handleJsonResponse(state, response) {
     let text;
     try {
@@ -151,7 +156,7 @@ export class AIProvider {
     const httpErrorText = response == null || response.ok ? "" :
       ` (HTTP code: ${response.status}${` ${response.statusText}`.trim()})`;
     this.onError?.call(this, {
-      text: `${errorMessage}${state.extraText}: ${error.message}${httpErrorText}`,
+      text: `${errorMessage}${state.extraText}: ${error?.message}${httpErrorText}`,
       error,
     });
     return false;
@@ -183,7 +188,7 @@ export class SteamShipPluginProvider extends AIProvider {
     let response;
     let taskId;
     try {
-      response = await fetch(this.proxy.modifyUrl(`${baseUrl}plugin/instance/generate`), {
+      response = await this.fetch(this.proxy.modifyUrl(`${baseUrl}plugin/instance/generate`), {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -204,7 +209,7 @@ export class SteamShipPluginProvider extends AIProvider {
 
     let prevState = '';
     while (true) {
-      response = await fetch(this.proxy.modifyUrl(`${baseUrl}task/status`), {
+      response = await this.fetch(this.proxy.modifyUrl(`${baseUrl}task/status`), {
         method: 'POST',
         headers,
         body: JSON.stringify({ taskId }),
@@ -218,6 +223,7 @@ export class SteamShipPluginProvider extends AIProvider {
         return this.raiseMessage({
           text: block.text,
           role: block.tags.filter(t => t.kind == 'role')[0]?.name ?? 'assistant',
+          mode: 'complete',
         });
       } else if (json.status.state == 'failed') {
         const errorMessage = `${json.status.statusCode}: ${json.status.statusMessage}`;
@@ -241,7 +247,7 @@ export class ScaleSpellbookProvider extends AIProvider {
   }
 
   async getResponse(state, messageText) {
-    return await fetch(this.proxy.modifyUrl(this.config.url), {
+    return await this.fetch(this.proxy.modifyUrl(this.config.url), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -256,13 +262,15 @@ export class ScaleSpellbookProvider extends AIProvider {
     if (json.output == null || json.message != null)
       return this.raiseError("Received error message", new Error(json.message || "Unknown"), state, response);
     else
-      return this.raiseMessage({ text: json.output, role: "" });
+      return this.raiseMessage({ text: json.output, role: "", mode: 'complete' });
   }
 }
 
 export class ScaleSpellbookFishProvider extends AIProvider {
+  pusher;
+
   async getResponse(state, messageText) {
-    return await fetch(`https://fishtailprotocol.com/projects/betterGPT4/scale-api.php`, {
+    return await this.fetch(`https://fishtailprotocol.com/projects/betterGPT4/scale-api.php`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -280,53 +288,147 @@ export class ScaleSpellbookFishProvider extends AIProvider {
 export class ChatBotKitProvider extends AIProvider {
   async sendRequest(state) {
     const messageRoleMap = { assistant: 'bot', system: 'backstory' };
+    const isSystemRole = role => role == 'backstory' || role == 'system';
 
-    let json = await this.getApiJson(state, 'conversation/create', {
-      backstory: "",
+    // Conversation: create
+    const allMessages = state.messages.filter(m => m.text?.length > 0);
+    const chatMessages = allMessages.filter(m => !isSystemRole(m.role));
+    const systemMessages = allMessages.filter(m => isSystemRole(m.role));
+    const prevMessages = chatMessages.slice(0, -1);
+    let json = await this.callApi(state, 'conversation/create', {
+      backstory: systemMessages.map(m => m.text).join("\n"),
       model: this.config.model,
       datasetId: "",
       skillsetId: "",
-      messages: state.messages.slice(0, -1).map(m => ({
+      messages: prevMessages.map(m => ({
         type: messageRoleMap[m.role] || m.role || 'user',
         text: m.text,
       }))
     });
     if (json === false)
       return false;
-    const modelId = json.id;
+    const convId = json.id;
 
-    json = await this.getApiJson(state, `conversation/${modelId}/send`, {
-      text: state.messages.slice(-1)[0].text,
+    // Conversation: send
+    const newMessage = chatMessages.slice(-1)[0];
+    json = await this.callApi(state, `conversation/${convId}/send`, {
+      text: newMessage.text,
       entities: [],
     });
     if (json === false)
       return false;
 
-    json = await this.getApiJson(state, `conversation/${modelId}/receive`, {
-      parse: false,
-    });
-    if (json === false)
-      return false;
-    const message = { role: 'bot', text: json.text };
-
     try {
-      json = await this.getApiJson(state, `conversation/${modelId}/delete`, {});
-      if (json === false)
-        return false;
+      let message = null;
+      if (this.config.stream) {
+        // Conversation: receive (stream)
+        try {
+          await this.connectToPusher(state);
+        }
+        catch (ex) {
+          this.raiseError("Failed to receive message", ex, state, null);
+          return false;
+        }
+        const channelId = generateUuid();
+        this.pusher.send(JSON.stringify({ event: 'pusher:subscribe', data: { auto: '', channel: channelId } }));
+        json = await this.callApi(state, `conversation/${convId}/receive`, {
+          parse: false,
+          channel: channelId,
+        }, true);
+      } else {
+        // Conversation: receive
+        json = await this.callApi(state, `conversation/${convId}/receive`, {
+          parse: false,
+        });
+        if (json === false)
+          return false;
+        message = { role: 'bot', text: json.text, mode: 'complete' };
+      }
+    } finally {
+      // Conversation: delete
+      try {
+        json = await this.callApi(state, `conversation/${convId}/delete`, {});
+        if (json === false)
+          return false;
+      } finally {
+        if (message != null)
+          this.raiseMessage(message);
+        else if (this.config.stream)
+          this.raiseMessage({ text: "", role: 'bot', mode: 'append' });
+      }
     }
-    finally {
-      this.raiseMessage(message);
-    }
+
     return true;
   }
 
-  async getApiJson(state, apiPath, data) {
+  async connectToPusher(state) {
+    const pusherConnectTimeoutMs = 10000;
+    if (this.pusher != null)
+      return;
+    const pusherConfig = {
+      appId: '',
+      key: 'a9198d6754ae6285290b',
+      secret: '',
+      cluster: 'mt1'
+    };
+    const pusherParams = new URLSearchParams({
+      protocol: 7,
+      client: 'js',
+      version: '8.0.1',
+    });
+    let resolveConnectionEstablshed = null;
+    this.pusher = new WebSocket(`wss://ws-${pusherConfig.cluster}.pusher.com/app/${pusherConfig.key}?${pusherParams}`);
+    this.pusher.addEventListener('message', e => {
+      if (state.signal.aborted) {
+        this.pusher.close();
+        return;
+      }
+      const message = JSON.parse(e.data);
+      const data = typeof message.data === 'string' ? JSON.parse(message.data) : null;
+      console.log("Pusher message", message, "data", data);
+      switch (message.event) {
+        case 'pusher:connection_established':
+          resolveConnectionEstablshed?.call();
+          break;
+        case 'batchTokensBegin':
+          console.log("Pusher begin tokens", message.channel);
+          break;
+        case 'batchTokensAvailable':
+          const tokensText = data.tokens.join("");
+          console.log("Pusher tokens", message.channel, tokensText);
+          this.raiseMessage({ text: tokensText, role: 'bot', mode: 'append' });
+          break;
+        case 'batchTokensEnd':
+          console.log("Pusher end tokens", message.channel, data.messageId);
+          this.pusher.close();
+          break;
+      }
+    });
+    this.pusher.addEventListener('error', e => {
+      this.raiseError("Pusher error", new Error(`${e}`), state, null);
+    });
+    console.log(this.pusher);
+    await Promise.race([
+      timeout(pusherConnectTimeoutMs),
+      new Promise(resolve => { resolveConnectionEstablshed = resolve }),
+    ]);
+    // {"event":"pusher:connection_established","data":"{\"socket_id\":\"445294.25458239\",\"activity_timeout\":120}"}
+    // OUT {"event":"pusher:subscribe","data":{"auth":"","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}}
+    // {"event":"pusher_internal:subscription_succeeded","data":"{}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}
+    // {"event":"batchTokensBegin","data":"{}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}
+    // {"event":"batchTokensAvailable","data":"{\"tokens\":[\" a\",\"b\"]}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}	
+    // {"event":"batchTokensEnd","data":"{\"messageId\":\"clfqr6we1000kl90fssqx1qmb\"}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}
+    // OUT {"event":"pusher:ping","data":{}}
+    // {"event":"pusher:pong","data":"{}"}
+  }
+
+  async callApi(state, apiPath, data, stream = false) {
     const baseUrl = this.config.url || 'https://api.chatbotkit.com/v1/';
     const headers = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.config.key}`,
     };
-    const response = await fetch(this.proxy.modifyUrl(`${baseUrl}${apiPath}`), {
+    const response = await this.fetch(this.proxy.modifyUrl(new URL(apiPath, baseUrl).toString()), {
       method: 'POST',
       headers,
       body: JSON.stringify(data),
@@ -336,7 +438,7 @@ export class ChatBotKitProvider extends AIProvider {
     let json = await this.handleJsonResponse(state, response);
     if (json === false)
       return false;
-    this.raiseLogMessage({ text: `Sending message (${taskName})`, data: [ json ] });
+    this.raiseLogMessage({ text: `Sending message (done: ${taskName})`, data: [ json ] });
     return json;
   }
 

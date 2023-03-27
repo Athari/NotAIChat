@@ -1,7 +1,32 @@
 'use strict'
 
 export function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export function timeout(ms) {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`Timeout ${ms} ms`)), ms);
+  });
+}
+
+export function generateUuid() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    try {
+      return ([ 1e7 ] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+      );
+    } catch {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+  }
 }
 
 export function loadData(id, defaultData) {
@@ -38,11 +63,11 @@ export function downloadFile(type, filename, data) {
 }
 
 export function uploadFile(type) {
-  document.querySelector('#uploadFile')?.remove();
-  document.body.insertAdjacentHTML('beforeEnd', `
-    <input type="file" id="uploadFile" accept="${type}" style="position: absolute; width: 0; height: 0; overflow: hidden" />
-  `);
-  const elUploadFile = document.querySelector('#uploadFile');
+  const styleOutOfSight = "position: absolute; width: 0; height: 0; overflow: hidden;";
+  document.querySelector('#uploadFileUtil')?.remove();
+  document.body.insertAdjacentHTML('beforeEnd', 
+    `<input type="file" id="uploadFile" accept="${type}" style="${styleOutOfSight}" />`);
+  const elUploadFile = document.querySelector('#uploadFileUtil');
   return new Promise((resolve, reject) => {
     let isChanged = false;
     elUploadFile.addEventListener('change', async () => {

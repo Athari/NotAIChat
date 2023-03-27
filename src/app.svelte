@@ -30,8 +30,8 @@
 
   let endpoints = [ AIConnectionFactory.createDefaultProviderConfig() ];
   let proxies = [ AIConnectionFactory.createDefaultProxyConfig() ];
-  let messages = [ { id: 1, text: "Hello GPT-4!" } ];
-  let newMessageText = "";
+  let messages = [ { id: 1, role: 'user', text: "Hello GPT-4!" } ];
+  let newMessage = { id: 0, role: 'user', text: "" };
   let isSending = false;
   let sendTime = null;
   let sendTimeText = "";
@@ -146,27 +146,6 @@
     return Number.isFinite(currentMaxId) ? currentMaxId + 1 : 1;
   }
 
-  async function displayMessage(e, lastMessage, response, extraText) {
-    if (json.error != null) {
-      log(`Received error${extraText}: ${json.error.code}: ${json.error.message}${httpErrorText}`);
-    } else if (json.message != null) {
-      log(`Received error${extraText}: ${json.message}${httpErrorText}`);
-    } else if (json.output != null) {
-      if (lastMessage == null) {
-        lastMessage = { id: getNextMessageId(), text: json.output };
-        messages = [ ...messages, lastMessage ];
-      } else {
-        lastMessage.text += ` ${json.output}`;
-        messages = [ ...messages ];
-        updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
-      }
-      log(`Received message${extraText}`, json);
-    } else {
-      log(`Failed to interpret message${extraText}${httpErrorText}`, json);
-    }
-    return lastMessage;
-  }
-
   async function sendMessageInternal(e, messageCount, stopOnFirstSuccess) {
     log("Sending message");
     addMessage({ target: e.target });
@@ -178,7 +157,8 @@
     }
 
     controller = new AbortController();
-    let lastMessage = null;
+    const lastMessage = messages.slice(-1)[0];
+    let targetMessage = lastMessage?.text == "" ? lastMessage : null;
     let indexText;
     const state = {
       get signal() { return controller.signal },
@@ -187,15 +167,18 @@
     };
     Object.assign(api, {
       onMessage(message) {
-        if (lastMessage == null) {
-          lastMessage = { id: getNextMessageId(), text: message.text, role: message.role };
-          messages = [ ...messages, lastMessage ];
+        if (targetMessage == null) {
+          targetMessage = { id: getNextMessageId(), text: message.text, role: message.role };
+          messages = [ ...messages, targetMessage ];
         } else {
-          lastMessage.text += ` ${message.text}`;
+          targetMessage.text += message.mode == 'append' ? message.text : ` ${message.text}`;
           messages = [ ...messages ];
           updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
         }
-        log(`Received message${state.extraText}`, message);
+        if (message.mode == 'complete' || message.mode == 'done')
+          log(`Received message${state.extraText}`, message);
+        else
+          log(`Receiving message${state.extraText}`, message);
       },
       onLogMessage(logMessage) {
         if (logMessage.data)
@@ -223,7 +206,7 @@
           continue;
         }
       }
-      if (controller.signal.aborted || (stopOnFirstSuccess && lastMessage != null))
+      if (controller.signal.aborted || (stopOnFirstSuccess && targetMessage != null))
         break;
     }
     isSending = false;
@@ -250,10 +233,10 @@
   }
 
   function addMessage(e) {
-    if (newMessageText == "")
+    if (newMessage.text == "")
       return;
-    messages = [ ...messages, { id: getNextMessageId(), text: newMessageText } ];
-    newMessageText = "";
+    messages = [ ...messages, { id: getNextMessageId(), text: newMessage.text, role: newMessage.role } ];
+    newMessage.text = "";
     updateMessageTextAreaSize(e);
   }
 
@@ -380,36 +363,73 @@
       </h3>
       {#each endpoints as endpoint, ie}
         <div class="endpoint">
-          <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
-          <input type=text bind:value={endpoint.name} placeholder="Display name">
-          <select bind:value={endpoint.typeId} placeholder="Provider">
-            {#each AIConnectionFactory.providers as provider}
-              <option value={provider.id}>{provider.displayName}</option>  
-            {/each}
-          </select>
+          <label class=side>
+            <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
+          </label>
+          <label class=over>
+            <b>Display name</b>
+            <input type=text bind:value={endpoint.name} placeholder="Display name">
+          </label>
+          <label class=over>
+            <b>Provider</b>
+            <select bind:value={endpoint.typeId} placeholder="Provider">
+              {#each AIConnectionFactory.providers as provider}
+                <option value={provider.id}>{provider.displayName}</option>  
+              {/each}
+            </select>
+          </label>
           {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
             {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit'}
-              <input type=text bind:value={endpoint.key} placeholder="API Key">
-              <input type=text bind:value={endpoint.url} placeholder="Base URL">
+              <label class=over>
+                <b>API key</b>
+                <input type=text bind:value={endpoint.key} placeholder="API key">
+              </label>
+              <label class=over>
+                <b>Base URL</b>
+                <input type=text bind:value={endpoint.url} placeholder="Base URL">
+              </label>
             {:else if provider.id == 'steamship-plugin'}
-              <input type=text bind:value={endpoint.key} placeholder="API Key">
-              <input type=text bind:value={endpoint.workspace} placeholder="Workspace">
+              <label class=over>
+                <b>API key</b>
+                <input type=text bind:value={endpoint.key} placeholder="API key">
+              </label>
+              <label class=over>
+                <b>Workspace</b>
+                <input type=text bind:value={endpoint.workspace} placeholder="Workspace">
+              </label>
             {:else if provider.id == 'scale-spellbook' || provider.id == 'scale-spellbook-fish'}
-              <input type=text bind:value={endpoint.key} placeholder="Deployment Key">
-              <input type=text bind:value={endpoint.url} placeholder="Deployment URL">
+              <label class=over>
+                <b>Deployment key</b>
+                <input type=text bind:value={endpoint.key} placeholder="Deployment key">
+              </label>
+              <label class=over>
+                <b>Deployment URL</b>
+                <input type=text bind:value={endpoint.url} placeholder="Deployment URL">
+              </label>
             {:else}
               <b>Choose endpoint provider</b>
             {/if}
             {#if provider.models.length > 0}
-              <input type=text bind:value={endpoint.model} placeholder="Model name" list="{provider.id}-models">
+              <label class=over>
+                <b>Model name</b>
+                <input type=text bind:value={endpoint.model} placeholder="Model name" list="{provider.id}-models">
+              </label>
+            {/if}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit'}
+              <label class=side>
+                <input type=checkbox bind:checked={endpoint.stream}>
+                <b>Stream</b>
+              </label>
             {/if}
           {/await}
-          <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
-            <Fa icon={faShareNodes} {...faTheme} />
-          </button>
-          <button type=button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
-            <Fa icon={faXmarkLarge} {...faTheme} />
-          </button>
+          <div class="buttons">
+            <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
+              <Fa icon={faShareNodes} {...faTheme} />
+            </button>
+            <button type=button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
+              <Fa icon={faXmarkLarge} {...faTheme} />
+            </button>
+          </div>
         </div>
       {/each}
       <h3>
@@ -421,24 +441,33 @@
       {#each proxies as proxy, ip}
         <div class="endpoint">
           <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set proxy as current">
-          <input type=text bind:value={proxy.name} placeholder="Display name">
-          <select bind:value={proxy.typeId} placeholder="Provider">
-            {#each AIConnectionFactory.proxies as proxy}
-              <option value={proxy.id}>{proxy.displayName}</option>  
-            {/each}
-          </select>
+          <label class=over>
+            <b>Display name</b>
+            <input type=text bind:value={proxy.name} placeholder="Display name">
+          </label>
+          <label class=over>
+            <b>Provider</b>
+            <select bind:value={proxy.typeId} placeholder="Provider">
+              {#each AIConnectionFactory.proxies as proxy}
+                <option value={proxy.id}>{proxy.displayName}</option>  
+              {/each}
+            </select>
+          </label>
           {#await AIConnectionFactory.getProxy(proxy.typeId) then provider}
             {#if provider.id == 'cors-anywhere'}
-              <input type=text bind:value={proxy.url} placeholder="Proxy URL">
-            {:else if provider.id == ''}
-              <b>No options</b>
-            {:else}
+              <label class=over>
+                <b>Proxy URL</b>
+                <input type=text bind:value={proxy.url} placeholder="Proxy URL">
+              </label>
+            {:else if provider.id != ''}
               <b>Choose proxy provider</b>
             {/if}
           {/await}
-          <button type=button on:click={() => deleteProxy(ip)} title="Delete proxy">
-            <Fa icon={faXmarkLarge} {...faTheme} />
-          </button>
+          <div class="buttons">
+            <button type=button on:click={() => deleteProxy(ip)} title="Delete proxy">
+              <Fa icon={faXmarkLarge} {...faTheme} />
+            </button>
+          </div>
         </div>
       {/each}
       <h3>Behavior</h3>
@@ -573,7 +602,8 @@
     {/each}
   </div>
   <div class="message new-message">
-    <textarea bind:value={newMessageText} disabled={isSending} placeholder="New message text"
+    <input type=text bind:value={newMessage.role} disabled={isSending} list=messageRole placeholder="New message role" />
+    <textarea bind:value={newMessage.text} disabled={isSending} placeholder="New message text"
               autocomplete=false use:autoResizeTextArea></textarea>
     <div class="buttons">
       <button type=button on:click={e => sendMessage(e)} disabled={isSending} title="Send message">
@@ -678,7 +708,7 @@
   .buttons {
     display: flex;
     flex-flow: row;
-    align-items: center;
+    align-items: stretch;
     gap: 8px;
   }
   .message {
@@ -687,11 +717,14 @@
       flex: 0 0 120px;
     }
   }
+  .endpoint {
+    flex-flow: row wrap;
+  }
   .option {
     width: 400px;
     label {
       flex: 1;
-    }
+    }    
   }
   .option-long {
     display: flex;
@@ -703,11 +736,40 @@
       padding: 0 12px;
     }
   }
+  :is(.endpoint) .buttons {
+    padding: calc(1lh + 4px) 0 0 0;
+  }
   .new-message {
     margin: 12px 0 0 0;
     .buttons {
       flex: 0 0 calc((var(--button-width) + var(--gap) + 0px) * 3 - var(--gap));
       flex-flow: row wrap;
+    }
+  }
+  label.over {
+    display: flex;
+    flex-flow: column;
+    flex: 1 250px;
+    b {
+      margin: 0 0 4px 0;
+      font-weight: inherit;
+    }
+  }
+  label.side {
+    display: flex;
+    flex-flow: row;
+    align-items: center;
+    flex: 0;
+    gap: 8px;
+    padding: calc(1lh + 4px) 0 0 0;
+    b {
+      font-weight: inherit;
+    }
+    input:is([type=checkbox], [type=radio]) {
+      width: 20px;
+      min-height: 20px;
+      padding: 0;
+      margin: 0;
     }
   }
   textarea,
