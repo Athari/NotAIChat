@@ -66,7 +66,7 @@ export function uploadFile(type) {
   const styleOutOfSight = "position: absolute; width: 0; height: 0; overflow: hidden;";
   document.querySelector('#uploadFileUtil')?.remove();
   document.body.insertAdjacentHTML('beforeEnd', 
-    `<input type="file" id="uploadFile" accept="${type}" style="${styleOutOfSight}" />`);
+    `<input type="file" id="uploadFileUtil" accept="${type}" style="${styleOutOfSight}" />`);
   const elUploadFile = document.querySelector('#uploadFileUtil');
   return new Promise((resolve, reject) => {
     let isChanged = false;
