@@ -309,17 +309,17 @@ export class ChatBotKitProvider extends AIProvider {
       return false;
     const convId = json.id;
 
-    // Conversation: send
-    const newMessage = chatMessages.slice(-1)[0];
-    json = await this.callApi(state, `conversation/${convId}/send`, {
-      text: newMessage.text,
-      entities: [],
-    });
-    if (json === false)
-      return false;
-
+    let message = null;
     try {
-      let message = null;
+      // Conversation: send
+      const newMessage = chatMessages.slice(-1)[0];
+      json = await this.callApi(state, `conversation/${convId}/send`, {
+        text: newMessage.text,
+        entities: [],
+      });
+      if (json === false)
+        return false;
+
       if (this.config.stream) {
         // Conversation: receive (stream)
         try {
@@ -366,9 +366,7 @@ export class ChatBotKitProvider extends AIProvider {
     if (this.pusher != null)
       return;
     const pusherConfig = {
-      appId: '',
       key: 'a9198d6754ae6285290b',
-      secret: '',
       cluster: 'mt1'
     };
     const pusherParams = new URLSearchParams({
