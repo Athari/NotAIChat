@@ -117,7 +117,9 @@ export class AIProvider {
 
   async fetch(input, init) {
     const response = await fetch(input, init);
-    console.log("Received HTTP response:", response, "headers:", [ ...response.headers.values() ]);
+    const headers = {};
+    response.headers.forEach((v, k) => headers[k] = v);
+    console.log("Received HTTP response:", response, "headers:", headers);
     return response;
   }
 
@@ -177,45 +179,30 @@ export class OpenAIChatProvider extends AIProvider {
 
 export class SteamShipPluginProvider extends AIProvider {
   async sendRequest(state) {
-    const baseUrl = 'https://api.steamship.com/api/v1/';
     const pollDelayMs = 2000;
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.config.key}`,
-      'X-Workspace-Handle': this.config.workspace,
-    };
 
-    let response;
-    let taskId;
-    try {
-      response = await this.fetch(this.proxy.modifyUrl(`${baseUrl}plugin/instance/generate`), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          appendOutputToFile: false,
-          text: state.messages.map(m => m.text).join("\n"),
-          pluginInstance: this.config.workspace,
-        }),
-        signal: state.signal,
-      });
-      const json = await response.json();
-      console.log("SteamShip init", json);
-      taskId = json?.status?.taskId;
-      if (taskId == null)
-        throw new Error("No task id");
-    } catch (ex) {
-      return this.raiseError("Failed to generate", ex, state, response);
-    }
+    // Plugin: instance: create
+    const allMessages = state.messages.filter(m => m.text?.length > 0);
+    let [ response, json ] = await this.callApi(state, 'plugin/instance/generate', {
+      appendOutputToFile: false,
+      text: allMessages.map(m => m.text).join("\n"),
+      pluginInstance: this.config.workspace,
+    })
+    if (json === false)
+      return false;
+    console.log("SteamShip init", json);
+    const taskId = json?.status?.taskId;
+    if (taskId == null)
+      return this.raiseError("Failed to generate", new Error("No task id"), state, response);
+    else
+      this.raiseLogMessage({ text: "Sending message (done: generate)" });
 
+    // Task: status
     let prevState = '';
     while (true) {
-      response = await this.fetch(this.proxy.modifyUrl(`${baseUrl}task/status`), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ taskId }),
-        signal: state.signal,
-      });
-      const json = await response.json();
+      [ response, json ] = await this.callApi(state, 'task/status', { taskId });
+      if (json === false)
+        return;
       console.log("SteamShip poll", json.status.state, json);
 
       if (json.data != null) {
@@ -225,9 +212,6 @@ export class SteamShipPluginProvider extends AIProvider {
           role: block.tags.filter(t => t.kind == 'role')[0]?.name ?? 'assistant',
           mode: 'complete',
         });
-      } else if (json.status.state == 'failed') {
-        const errorMessage = `${json.status.statusCode}: ${json.status.statusMessage}`;
-        return this.raiseError("Failed to generate message", new Error(errorMessage), state, response);
       }
 
       if (prevState != json.status.state) {
@@ -236,6 +220,31 @@ export class SteamShipPluginProvider extends AIProvider {
       }
       await delay(pollDelayMs);
     }
+  }
+
+  async callApi(state, apiPath, data) {
+    const baseUrl = this.config.url || 'https://api.steamship.com/api/v1/';
+    const response = await this.fetch(this.proxy.modifyUrl(new URL(apiPath, baseUrl).toString()), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.key}`,
+        'X-Workspace-Handle': this.config.workspace,
+      },
+      body: JSON.stringify(data),
+      signal: state.signal,
+    });
+    const json = await this.handleJsonResponse(state, response);
+    return [ response, json ];
+  }
+
+  async handleJson(json, state, response) {
+    if (json?.status?.state == 'failed') {
+      const { statusCode, statusMessage } = json.status;
+      const errorMessage = `${statusCode != null ? `${statusCode}: ` : ""}${statusMessage}`;
+      return this.raiseError("Received error message", new Error(errorMessage), state, response);
+    }
+    return json;
   }
 }
 
@@ -286,16 +295,19 @@ export class ScaleSpellbookFishProvider extends AIProvider {
 }
 
 export class ChatBotKitProvider extends AIProvider {
+  static baseApiUrl = 'https://api.chatbotkit.com/v1/';
+
   async sendRequest(state) {
     const messageRoleMap = { assistant: 'bot', system: 'backstory' };
     const isSystemRole = role => role == 'backstory' || role == 'system';
+    let response, json;
 
     // Conversation: create
     const allMessages = state.messages.filter(m => m.text?.length > 0);
     const chatMessages = allMessages.filter(m => !isSystemRole(m.role));
     const systemMessages = allMessages.filter(m => isSystemRole(m.role));
     const prevMessages = chatMessages.slice(0, -1);
-    let json = await this.callApi(state, 'conversation/create', {
+    [ response, json ] = await this.callApi(state, 'conversation/create', {
       backstory: systemMessages.map(m => m.text).join("\n"),
       model: this.config.model,
       datasetId: "",
@@ -313,7 +325,7 @@ export class ChatBotKitProvider extends AIProvider {
     try {
       // Conversation: send
       const newMessage = chatMessages.slice(-1)[0];
-      json = await this.callApi(state, `conversation/${convId}/send`, {
+      [ response, json ] = await this.callApi(state, `conversation/${convId}/send`, {
         text: newMessage.text,
         entities: [],
       });
@@ -331,13 +343,14 @@ export class ChatBotKitProvider extends AIProvider {
         }
         const channelId = generateUuid();
         this.pusher.send(JSON.stringify({ event: 'pusher:subscribe', data: { auto: '', channel: channelId } }));
-        json = await this.callApi(state, `conversation/${convId}/receive`, {
+        [ response, json ] = await this.callApi(state, `conversation/${convId}/receive`, {
           parse: false,
           channel: channelId,
-        }, true);
+        });
+        message = { text: "", role: 'bot', mode: 'done' };
       } else {
         // Conversation: receive
-        json = await this.callApi(state, `conversation/${convId}/receive`, {
+        [ response, json ] = await this.callApi(state, `conversation/${convId}/receive`, {
           parse: false,
         });
         if (json === false)
@@ -347,14 +360,10 @@ export class ChatBotKitProvider extends AIProvider {
     } finally {
       // Conversation: delete
       try {
-        json = await this.callApi(state, `conversation/${convId}/delete`, {});
-        if (json === false)
-          return false;
+        [ response, json ] = await this.callApi(state, `conversation/${convId}/delete`, {}, false);
       } finally {
         if (message != null)
           this.raiseMessage(message);
-        else if (this.config.stream)
-          this.raiseMessage({ text: "", role: 'bot', mode: 'append' });
       }
     }
 
@@ -420,24 +429,22 @@ export class ChatBotKitProvider extends AIProvider {
     // {"event":"pusher:pong","data":"{}"}
   }
 
-  async callApi(state, apiPath, data, stream = false) {
-    const baseUrl = this.config.url || 'https://api.chatbotkit.com/v1/';
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.config.key}`,
-    };
+  async callApi(state, apiPath, data, isLogged = true) {
+    const baseUrl = this.config.url || ChatBotKitProvider.baseApiUrl;
     const response = await this.fetch(this.proxy.modifyUrl(new URL(apiPath, baseUrl).toString()), {
       method: 'POST',
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.key}`,
+      },
       body: JSON.stringify(data),
       signal: state.signal,
     });
     const taskName = apiPath.replace(/\/(.*\/)?/, ' - ');
-    let json = await this.handleJsonResponse(state, response);
-    if (json === false)
-      return false;
-    this.raiseLogMessage({ text: `Sending message (done: ${taskName})`, data: [ json ] });
-    return json;
+    const json = await this.handleJsonResponse(state, response);
+    if (json !== false && isLogged)
+      this.raiseLogMessage({ text: `Sending message (done: ${taskName})`, data: [ json ] });
+    return [ response, json ];
   }
 
   async handleJson(json, state, response) {

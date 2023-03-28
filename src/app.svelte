@@ -167,17 +167,19 @@
     };
     Object.assign(api, {
       onMessage(message) {
-        if (targetMessage == null) {
-          targetMessage = { id: getNextMessageId(), text: message.text, role: message.role };
-          messages = [ ...messages, targetMessage ];
-        } else {
-          targetMessage.text += message.mode == 'append' ? message.text : ` ${message.text}`;
-          messages = [ ...messages ];
-          updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
+        if (message.mode != 'done') {
+          if (targetMessage == null) {
+            targetMessage = { id: getNextMessageId(), text: message.text, role: message.role };
+            messages = [ ...messages, targetMessage ];
+          } else {
+            targetMessage.text += message.text;
+            messages = [ ...messages ];
+            updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
+          }
         }
         if (message.mode == 'complete' || message.mode == 'done')
           log(`Received message${state.extraText}`, message);
-        else
+        else (message.mode == 'append')
           log(`Receiving message${state.extraText}`, message);
       },
       onLogMessage(logMessage) {
