@@ -1,5 +1,10 @@
 'use strict'
 
+import {
+  Client as AnthropicClient,
+  AI_PROMPT as AnthropicAssistantPrompt,
+  HUMAN_PROMPT as AnthropicHumanPrompt,
+} from "@anthropic-ai/sdk";
 import { delay, timeout, generateUuid } from './utils'
 
 export class AIConnectionFactory {
@@ -33,6 +38,12 @@ export class AIConnectionFactory {
         { key: "", url: "", model: "", stream: false },
         [ 'user', 'assistant', 'system' ],
         [ 'gpt-4', 'gpt-4-32k', 'gpt-3.5-turbo' ],
+      ),
+      new AIConnectionFactory(
+        'anthropic-chat', "Anthropic", AnthropicChatProvider,
+        { key: "", url: "", model: "", stream: false },
+        [ 'human', 'assistant' ],
+        [ 'claude-v1', 'claude-v1.0', 'claude-v1.2', 'claude-instant-v1', 'claude-instant-v1.0' ],
       ),
       new AIConnectionFactory(
         'steamship-plugin', "SteamShip Plugin", SteamShipPluginProvider,
@@ -175,6 +186,53 @@ export class OpenAITextProvider extends AIProvider {
 }
 
 export class OpenAIChatProvider extends AIProvider {
+}
+
+export class AnthropicChatProvider extends AIProvider {
+  async sendRequest(state) {
+    const getMessageRole = r => (r || '').match(/user|human/i) ? AnthropicHumanPrompt : AnthropicAssistantPrompt;
+    const client = new AnthropicClient(this.config.key, {
+      apiUrl: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
+    });
+    const allMessages = state.messages.filter(m => m.text?.length > 0);
+    const params = {
+      prompt: allMessages.map(m => `${getMessageRole(m.role)} ${m.text}`).join("") + AnthropicAssistantPrompt,
+      model: this.config.model,
+      temperature: 1,
+      //top_p: -1,
+      //top_k: -1,
+      max_tokens_to_sample: 2048,
+      stop_sequences: [ AnthropicHumanPrompt ],
+    };
+    let response = null;
+    try {
+      if (this.config.stream) {
+        let prevCompletion = "";
+        await client.completeStream(params, {
+          onOpen: r => {
+            response = r;
+          },
+          onUpdate: message => {
+            if (message.exception != null)
+              return this.raiseError("Received error", new Error(message.exception), state, response);
+            this.raiseMessage({ text: message.completion.substring(prevCompletion.length), role: 'assistant', mode: 'append' });
+            prevCompletion = message.completion;
+          },
+          signal: state.signal,
+        });
+        return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
+      } else {
+        const message = await client.complete(params, {
+          signal: state.signal,
+        });
+        if (message.exception != null)
+          return this.raiseError("Received error", new Error(message.exception), state, response);
+        return this.raiseMessage({ text: message.completion, role: 'assistant', mode: 'complete' });
+      }
+    } catch (ex) {
+      return this.raiseError("Query failed", ex, state, response);
+    }
+  }
 }
 
 export class SteamShipPluginProvider extends AIProvider {

@@ -381,7 +381,7 @@
             </select>
           </label>
           {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit'}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-chat'}
               <label class=over>
                 <b>API key</b>
                 <input type=text bind:value={endpoint.key} placeholder="API key">
@@ -417,7 +417,7 @@
                 <input type=text bind:value={endpoint.model} placeholder="Model name" list="{provider.id}-models">
               </label>
             {/if}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit'}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-chat'}
               <label class=side>
                 <input type=checkbox bind:checked={endpoint.stream}>
                 <b>Stream</b>
