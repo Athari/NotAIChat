@@ -92,7 +92,7 @@
   $: faThemeWithLabel = Object.assign({}, faTheme, { style: "margin: 0 calc(var(--gap) * 1.5) 0 calc(var(--gap) * 0.5)" })
   $: sendTimeText = (() => getTimeText())(currentTime);
   $: selectedEndpoint = endpoints[options.selectedEndpointIndex];
-  $: selectedProxy = endpoints[options.selectedProxyIndex];
+  $: selectedProxy = proxies[options.selectedProxyIndex];
 
   function log(message, ...args) {
     console.log(message, ...args);
@@ -381,7 +381,7 @@
             </select>
           </label>
           {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-chat'}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-chat' || provider.id == 'natdev'}
               <label class=over>
                 <b>API key</b>
                 <input type=text bind:value={endpoint.key} placeholder="API key">

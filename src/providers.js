@@ -1,10 +1,12 @@
 'use strict'
 
 import {
-  Client as AnthropicClient,
+  Anthropic as AnthropicClient,
+  Config as AnthropicConfig,
   AI_PROMPT as AnthropicAssistantPrompt,
   HUMAN_PROMPT as AnthropicHumanPrompt,
 } from "@anthropic-ai/sdk";
+import OpenAI from 'openai';
 import { delay, timeout, generateUuid } from './utils'
 
 export class AIConnectionFactory {
@@ -34,7 +36,7 @@ export class AIConnectionFactory {
         [ 'text-davinci-003', 'text-davinci-002', 'davinci' ],
       ),
       new AIConnectionFactory(
-        'openai-chat', "OpenAI Chat (TODO)", OpenAIChatProvider,
+        'openai-chat', "OpenAI Chat", OpenAIChatProvider,
         { key: "", url: "", model: "", stream: false },
         [ 'user', 'assistant', 'system' ],
         [ 'gpt-4', 'gpt-4-32k', 'gpt-3.5-turbo' ],
@@ -42,8 +44,17 @@ export class AIConnectionFactory {
       new AIConnectionFactory(
         'anthropic-chat', "Anthropic", AnthropicChatProvider,
         { key: "", url: "", model: "", stream: false },
-        [ 'human', 'assistant' ],
-        [ 'claude-v1', 'claude-v1.0', 'claude-v1.2', 'claude-instant-v1', 'claude-instant-v1.0' ],
+        [ 'human', 'assistant', 'system' ],
+        [ 'claude-v1', 'claude-v1.0', 'claude-v1.2', 'claude-v1.3', 'claude-instant-v1', 'claude-instant-v1.0' ],
+      ),
+      new AIConnectionFactory(
+        'natdev', "Nat.dev", NatDevChatProvider,
+        { key: "", url: "", model: "", stream: false }, [],
+        [
+          'textgeneration:llama-65b', 'replicate:alpaca-7b', 'replicate:llama-13b', 'huggingface:bigscience/bloomz',
+          'openai:gpt-3.5-turbo', 'openai:gpt-4', 'openai:text-davinci-002',, 'openai:text-davinci-003',
+          'anthropic:claude-instant-v1.0', 'anthropic:claude-v1.2',
+        ],
       ),
       new AIConnectionFactory(
         'steamship-plugin', "SteamShip Plugin", SteamShipPluginProvider,
@@ -186,13 +197,54 @@ export class OpenAITextProvider extends AIProvider {
 }
 
 export class OpenAIChatProvider extends AIProvider {
+  async sendRequest(state) {
+    const getMessageRole = r =>
+      (r || '').match(/system/i) ? 'system' :
+      (r || '').match(/user|human/i) ? 'user' : 'assistant';
+    const client = new OpenAI({
+      apiKey: this.config.key,
+      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
+      dangerouslyAllowBrowser: true,
+    });
+    const allMessages = state.messages.filter(m => m.text?.length > 0);
+    const params = {
+      messages: allMessages.map(m => ({
+        role: getMessageRole(m.role),
+        content: m.text,
+      })),
+      model: this.config.model,
+      temperature: 1,
+      //top_p: null,
+      //frequency_penalty: 0.0,
+      //presence_penalty: 0.0,
+      max_tokens: 800,
+    };
+    let response = null;
+    try {
+      if (this.config.stream) {
+        const stream = await client.chat.completions.create({ ...params, stream: true });
+        state.signal.addEventListener('abort', () => stream.controller.abort());
+        for await (const message of stream)
+          this.raiseMessage({ text: message.choices[0]?.delta?.content ?? "", role: 'assistant', mode: 'append' });
+        return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
+      } else {
+        const message = await client.chat.completions.create({ ...params, stream: false });
+        return this.raiseMessage({ text: message.choices[0]?.delta?.content ?? "", role: 'assistant', mode: 'complete' });
+      }
+    } catch (ex) {
+      return this.raiseError("Query failed", ex, state, response);
+    }
+  }
 }
 
 export class AnthropicChatProvider extends AIProvider {
   async sendRequest(state) {
-    const getMessageRole = r => (r || '').match(/user|human/i) ? AnthropicHumanPrompt : AnthropicAssistantPrompt;
-    const client = new AnthropicClient(this.config.key, {
-      apiUrl: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
+    const getMessageRole = r =>
+      (r || '').match(/system/i) ? "System Note" :
+      (r || '').match(/user|human/i) ? AnthropicHumanPrompt : AnthropicAssistantPrompt;
+    const client = new AnthropicClient({
+      apiKey: this.config.key,
+      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
     });
     const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
@@ -201,37 +253,135 @@ export class AnthropicChatProvider extends AIProvider {
       temperature: 1,
       //top_p: -1,
       //top_k: -1,
-      max_tokens_to_sample: 2048,
+      max_tokens_to_sample: 1024,
       stop_sequences: [ AnthropicHumanPrompt ],
     };
     let response = null;
     try {
       if (this.config.stream) {
-        let prevCompletion = "";
-        await client.completeStream(params, {
-          onOpen: r => {
-            response = r;
-          },
-          onUpdate: message => {
-            if (message.exception != null)
-              return this.raiseError("Received error", new Error(message.exception), state, response);
-            this.raiseMessage({ text: message.completion.substring(prevCompletion.length), role: 'assistant', mode: 'append' });
-            prevCompletion = message.completion;
-          },
-          signal: state.signal,
-        });
+        const stream = await client.completions.create({ ...params, stream: true });
+        response = stream.response;
+        state.signal.addEventListener('abort', () => stream.controller.abort());
+        for await (const message of stream)
+          this.raiseMessage({ text: message.completion, role: 'assistant', mode: 'append' });
         return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
       } else {
-        const message = await client.complete(params, {
-          signal: state.signal,
-        });
-        if (message.exception != null)
-          return this.raiseError("Received error", new Error(message.exception), state, response);
+        const message = await client.completions.create({ ...params, stream: false });
         return this.raiseMessage({ text: message.completion, role: 'assistant', mode: 'complete' });
       }
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
     }
+  }
+}
+
+export class NatDevChatProvider extends AIProvider {
+  constructor(config, proxy) {
+    super(config, proxy);
+  }
+
+  async sendRequest(state) {
+    let response, json;
+    console.log(this);
+    response = await this.fetch(this.proxy.modifyUrl("https://clerk.nat.dev/v1/client?_clerk_js_version=4.35.0"), {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Origin': 'https://nat.dev',
+        'Referer': 'https://nat.dev/',
+      },
+      signal: state.signal,
+    });
+    console.log(await response.json());
+    /*[ response, json ] = await this.callApi(state, 'GET', 'all_models', null);
+    if (json === false)
+      return;*/
+    console.log("All models", json);
+  }
+
+  async sendAsyncApi(state) {
+    const connectTimeoutMs = 10000;
+    if (this.pusher != null)
+      return;
+    const pusherConfig = {
+      key: 'a9198d6754ae6285290b',
+      cluster: 'mt1'
+    };
+    const pusherParams = new URLSearchParams({
+      protocol: 7,
+      client: 'js',
+      version: '8.0.1',
+    });
+    let resolveConnectionEstablshed = null;
+    this.pusher = new WebSocket(`wss://ws-${pusherConfig.cluster}.pusher.com/app/${pusherConfig.key}?${pusherParams}`);
+    this.pusher.addEventListener('message', e => {
+      if (state.signal.aborted) {
+        this.pusher.close();
+        return;
+      }
+      const message = JSON.parse(e.data);
+      const data = typeof message.data === 'string' ? JSON.parse(message.data) : null;
+      console.log("Pusher message", message, "data", data);
+      switch (message.event) {
+        case 'pusher:connection_established':
+          resolveConnectionEstablshed?.call();
+          break;
+        case 'batchTokensBegin':
+          console.log("Pusher begin tokens", message.channel);
+          break;
+        case 'batchTokensAvailable':
+          const tokensText = data.tokens.join("");
+          console.log("Pusher tokens", message.channel, tokensText);
+          this.raiseMessage({ text: tokensText, role: 'bot', mode: 'append' });
+          break;
+        case 'batchTokensEnd':
+          console.log("Pusher end tokens", message.channel, data.messageId);
+          this.pusher.close();
+          break;
+      }
+    });
+    this.pusher.addEventListener('error', e => {
+      this.raiseError("Pusher error", new Error(`${e}`), state, null);
+    });
+    console.log(this.pusher);
+    await Promise.race([
+      timeout(connectTimeoutMs),
+      new Promise(resolve => { resolveConnectionEstablshed = resolve }),
+    ]);
+    // {"event":"pusher:connection_established","data":"{\"socket_id\":\"445294.25458239\",\"activity_timeout\":120}"}
+    // OUT {"event":"pusher:subscribe","data":{"auth":"","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}}
+    // {"event":"pusher_internal:subscription_succeeded","data":"{}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}
+    // {"event":"batchTokensBegin","data":"{}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}
+    // {"event":"batchTokensAvailable","data":"{\"tokens\":[\" a\",\"b\"]}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}	
+    // {"event":"batchTokensEnd","data":"{\"messageId\":\"clfqr6we1000kl90fssqx1qmb\"}","channel":"b92249d1-0994-505e-9c6a-45e1789269c9"}
+    // OUT {"event":"pusher:ping","data":{}}
+    // {"event":"pusher:pong","data":"{}"}
+  }
+
+  async callApi(state, method, apiPath, data) {
+    const baseUrl = this.config.url || 'https://nat.dev/api/';
+    const response = await this.fetch(this.proxy.modifyUrl(new URL(apiPath, baseUrl).toString()), {
+      method: method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.key}`,
+        'Origin': 'https://nat.dev',
+        'Referer': 'https://nat.dev/',
+      },
+      body: method == 'POST' && data != null ? JSON.stringify(data) : null,
+      signal: state.signal,
+    });
+    const json = await this.handleJsonResponse(state, response);
+    return [ response, json ];
+  }
+
+  async handleJson(json, state, response) {
+    /*if (json?.status?.state == 'failed') {
+      const { statusCode, statusMessage } = json.status;
+      const errorMessage = `${statusCode != null ? `${statusCode}: ` : ""}${statusMessage}`;
+      return this.raiseError("Received error message", new Error(errorMessage), state, response);
+    }*/
+    return json;
   }
 }
 
