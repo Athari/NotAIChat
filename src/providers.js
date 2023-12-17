@@ -31,9 +31,9 @@ export class AIConnectionFactory {
         {}, [], [],
       ),
       new AIConnectionFactory(
-        'openai-text', "OpenAI Text (TODO)", OpenAITextProvider,
+        'openai-text', "OpenAI Text", OpenAITextProvider,
         { key: "", url: "", model: "", stream: false }, [],
-        [ 'text-davinci-003', 'text-davinci-002', 'davinci' ],
+        [ 'gpt-3.5-turbo-instruct' ],
       ),
       new AIConnectionFactory(
         'openai-chat', "OpenAI Chat", OpenAIChatProvider,
@@ -194,6 +194,38 @@ export class EmptyAIProvider extends AIProvider {
 }
 
 export class OpenAITextProvider extends AIProvider {
+  async sendRequest(state) {
+    const client = new OpenAI({
+      apiKey: this.config.key,
+      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.openai.com'),
+      dangerouslyAllowBrowser: true,
+    });
+    const allMessages = state.messages.filter(m => m.text?.length > 0);
+    const params = {
+      prompt: allMessages.map(m => m.text).join("\n\n"),
+      model: this.config.model,
+      temperature: 0.7,
+      //top_p: null,
+      //frequency_penalty: 0.0,
+      //presence_penalty: 0.0,
+      max_tokens: 1024,
+    };
+    let response = null;
+    try {
+      if (this.config.stream) {
+        const stream = await client.completions.create({ ...params, stream: true });
+        state.signal.addEventListener('abort', () => stream.controller.abort());
+        for await (const message of stream)
+          this.raiseMessage({ text: message.choices[0]?.text ?? "", role: 'assistant', mode: 'append' });
+        return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
+      } else {
+        const message = await client.completions.create({ ...params, stream: false });
+        return this.raiseMessage({ text: message.choices[0]?.text ?? "", role: 'assistant', mode: 'complete' });
+      }
+    } catch (ex) {
+      return this.raiseError("Query failed", ex, state, response);
+    }
+  }
 }
 
 export class OpenAIChatProvider extends AIProvider {
@@ -203,7 +235,7 @@ export class OpenAIChatProvider extends AIProvider {
       (r || '').match(/user|human/i) ? 'user' : 'assistant';
     const client = new OpenAI({
       apiKey: this.config.key,
-      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
+      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.openai.com'),
       dangerouslyAllowBrowser: true,
     });
     const allMessages = state.messages.filter(m => m.text?.length > 0);
@@ -213,11 +245,11 @@ export class OpenAIChatProvider extends AIProvider {
         content: m.text,
       })),
       model: this.config.model,
-      temperature: 1,
+      temperature: 0.9,
       //top_p: null,
       //frequency_penalty: 0.0,
       //presence_penalty: 0.0,
-      max_tokens: 800,
+      max_tokens: 1024,
     };
     let response = null;
     try {
@@ -229,7 +261,7 @@ export class OpenAIChatProvider extends AIProvider {
         return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
       } else {
         const message = await client.chat.completions.create({ ...params, stream: false });
-        return this.raiseMessage({ text: message.choices[0]?.delta?.content ?? "", role: 'assistant', mode: 'complete' });
+        return this.raiseMessage({ text: message.choices[0]?.message?.content ?? "", role: 'assistant', mode: 'complete' });
       }
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
