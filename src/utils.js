@@ -12,6 +12,16 @@ export function timeout(ms) {
   });
 }
 
+export function parseFloatOrNull(s) {
+  const r = parseFloat(s);
+  return !Number.isNaN(r) && Number.isFinite(r) ? r : null;
+}
+
+export function parseIntOrNull(s) {
+  const r = parseInt(s, 10);
+  return !Number.isNaN(r) && Number.isFinite(r) ? r : null;
+}
+
 export function generateUuid() {
   try {
     return crypto.randomUUID();

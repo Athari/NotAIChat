@@ -26,6 +26,10 @@
     multiMessageCount: 10,
     retryMessageCount: 5,
     density: 'compact',
+    maxTokens: 1024,
+    temperature: 1.0,
+    frequencyPenalty: 0.0,
+    presencePenalty: 0.0,
   };
 
   let endpoints = [ AIConnectionFactory.createDefaultProviderConfig() ];
@@ -46,7 +50,6 @@
   let faTheme = { scale: 1.3 };
   let faThemeWithLabel = Object.assign({}, faTheme);
   
-  const messageRoles = [ 'system', 'user', 'assistant' ];
   const textAreaHeight = 20;
   const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
   const secondNumberFormat0 = new Intl.NumberFormat('en-gb',
@@ -150,7 +153,7 @@
     log("Sending message");
     addMessage({ target: e.target });
     isSending = true;
-    const api = AIConnectionFactory.createConnection(selectedEndpoint, selectedProxy);
+    const api = AIConnectionFactory.createConnection(selectedEndpoint, selectedProxy, options);
     if (api == null) {
       log("No endpoint selected");
       return;
@@ -472,6 +475,25 @@
           </div>
         </div>
       {/each}
+      <h3>Model options</h3>
+      <div class="options">
+        <div class="option">
+          <label for=maxTokens>Max tokens</label>
+          <input type=text bind:value={options.maxTokens} id=maxTokens />
+        </div>
+        <div class="option">
+          <label for=temperature>Temperature</label>
+          <input type=text bind:value={options.temperature} id=temperature />
+        </div>
+        <div class="option">
+          <label for=frequencyPenalty>Frequency penalty</label>
+          <input type=text bind:value={options.frequencyPenalty} id=frequencyPenalty />
+        </div>
+        <div class="option">
+          <label for=presencePenalty>Presence penalty</label>
+          <input type=text bind:value={options.presencePenalty} id=presencePenalty />
+        </div>
+      </div>
       <h3>Behavior</h3>
       <div class="options">
         <div class="option">

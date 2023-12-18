@@ -7,7 +7,7 @@ import {
   HUMAN_PROMPT as AnthropicHumanPrompt,
 } from "@anthropic-ai/sdk";
 import OpenAI from 'openai';
-import { delay, timeout, generateUuid } from './utils'
+import { delay, timeout, generateUuid, parseFloatOrNull, parseIntOrNull } from './utils'
 
 export class AIConnectionFactory {
   static providers = [];
@@ -93,14 +93,20 @@ export class AIConnectionFactory {
     return Object.assign({}, { typeId: this.id, name: "Name" }, this.defaultConfig);
   }
 
-  static createConnection(providerConfig, proxyConfig) {
+  static createConnection(providerConfig, proxyConfig, options) {
     if (providerConfig == null)
       return null;
     const provider = AIConnectionFactory.getProvider(providerConfig.typeId);
     if (provider.runner === EmptyAIProvider)
       return null;
     const proxy = AIConnectionFactory.getProxy(proxyConfig?.typeId);
-    return new provider.runner(providerConfig, new proxy.runner(proxyConfig));
+    const modelOptions = {
+      maxTokens: parseIntOrNull(options.maxTokens),
+      temperature: parseFloatOrNull(options.temperature),
+      frequencyPenalty: parseFloatOrNull(options.frequencyPenalty),
+      presencePenalty: parseFloatOrNull(options.presencePenalty),
+    }
+    return new provider.runner(Object.assign(modelOptions, providerConfig), new proxy.runner(proxyConfig));
   }
 
   static getProvider(id) {
@@ -202,13 +208,13 @@ export class OpenAITextProvider extends AIProvider {
     });
     const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
-      prompt: allMessages.map(m => m.text).join("\n\n"),
+      prompt: allMessages.map(m => `${m.text}\n\n`).join(""),
       model: this.config.model,
-      temperature: 0.7,
+      max_tokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      frequency_penalty: this.config.frequencyPenalty,
+      presence_penalty: this.config.presencePenalty,
       //top_p: null,
-      //frequency_penalty: 0.0,
-      //presence_penalty: 0.0,
-      max_tokens: 1024,
     };
     let response = null;
     try {
@@ -245,11 +251,11 @@ export class OpenAIChatProvider extends AIProvider {
         content: m.text,
       })),
       model: this.config.model,
-      temperature: 0.9,
+      max_tokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      frequency_penalty: this.config.frequencyPenalty,
+      presence_penalty: this.config.presencePenalty,
       //top_p: null,
-      //frequency_penalty: 0.0,
-      //presence_penalty: 0.0,
-      max_tokens: 1024,
     };
     let response = null;
     try {
@@ -282,10 +288,10 @@ export class AnthropicChatProvider extends AIProvider {
     const params = {
       prompt: allMessages.map(m => `${getMessageRole(m.role)} ${m.text}`).join("") + AnthropicAssistantPrompt,
       model: this.config.model,
-      temperature: 1,
+      max_tokens_to_sample: this.config.maxTokens,
+      temperature: this.config.temperature,
       //top_p: -1,
       //top_k: -1,
-      max_tokens_to_sample: 1024,
       stop_sequences: [ AnthropicHumanPrompt ],
     };
     let response = null;
