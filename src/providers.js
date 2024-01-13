@@ -278,7 +278,7 @@ export class OpenAIChatProvider extends AIProvider {
 export class AnthropicChatProvider extends AIProvider {
   async sendRequest(state) {
     const getMessageRole = r =>
-      (r || '').match(/system/i) ? "System Note" :
+      (r || '').match(/system/i) ? "" :
       (r || '').match(/user|human/i) ? AnthropicHumanPrompt : AnthropicAssistantPrompt;
     const client = new AnthropicClient({
       apiKey: this.config.key,
@@ -286,7 +286,8 @@ export class AnthropicChatProvider extends AIProvider {
     });
     const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
-      prompt: allMessages.map(m => `${getMessageRole(m.role)} ${m.text}`).join("") + AnthropicAssistantPrompt,
+      prompt: allMessages.map(m => `${getMessageRole(m.role)}${m.text}`).join("") +
+        (getMessageRole(allMessages.at(-1)?.role) == AnthropicAssistantPrompt ? "" : AnthropicAssistantPrompt),
       model: this.config.model,
       max_tokens_to_sample: this.config.maxTokens,
       temperature: this.config.temperature,

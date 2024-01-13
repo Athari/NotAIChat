@@ -160,8 +160,8 @@
     }
 
     controller = new AbortController();
-    const lastMessage = messages.slice(-1)[0];
-    let targetMessage = lastMessage?.text == "" ? lastMessage : null;
+    const lastMessage = messages.at(-1);
+    let targetMessage = lastMessage?.text == "" || lastMessage.role == 'assistant' ? lastMessage : null;
     let indexText;
     const state = {
       get signal() { return controller.signal },
