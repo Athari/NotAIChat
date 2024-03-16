@@ -3,7 +3,7 @@
 
   import { onMount } from 'svelte'
   import Fa from 'svelte-fa'
-  import { loadData, saveData, downloadFile, uploadFile } from './utils'
+  import { loadData, saveData, downloadFile, uploadFile, delay } from './utils'
   import { AIConnectionFactory } from './providers'
   import { faArrowDown } from '@fortawesome/pro-solid-svg-icons/faArrowDown'
   import { faArrowUp } from '@fortawesome/pro-solid-svg-icons/faArrowUp'
@@ -142,6 +142,8 @@
     if (!(json instanceof Array && typeof json[0].text == 'string'))
       return;
     messages = isAppend ? [ ...messages, ...json ] : json;
+    await delay(0);
+    updateAllTextAreaSizes();
   }
 
   function getNextMessageId() {
@@ -162,6 +164,7 @@
     controller = new AbortController();
     const lastMessage = messages.at(-1);
     let targetMessage = lastMessage?.text == "" || lastMessage.role == 'assistant' ? lastMessage : null;
+    let isTextReceived = false;
     let indexText;
     const state = {
       get signal() { return controller.signal },
@@ -177,6 +180,7 @@
           } else {
             targetMessage.text += message.text;
             messages = [ ...messages ];
+            isTextReceived |= message.text.length > 0;
             updateMessageTextAreaSize({ target: [...document.querySelectorAll('.messages textarea')].slice(-1)[0] });
           }
         }
@@ -211,7 +215,7 @@
           continue;
         }
       }
-      if (controller.signal.aborted || (stopOnFirstSuccess && targetMessage != null))
+      if (controller.signal.aborted || (stopOnFirstSuccess && isTextReceived))
         break;
     }
     isSending = false;
@@ -245,8 +249,10 @@
     updateMessageTextAreaSize(e);
   }
 
-  function deleteMessage(im) {
+  async function deleteMessage(im) {
     messages = messages.filter((m, i) => i !== im);
+    await delay(0);
+    updateAllTextAreaSizes();
   }
 
   function swapMessages(im1, im2) {
@@ -384,7 +390,7 @@
             </select>
           </label>
           {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-chat' || provider.id == 'natdev'}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-text' || provider.id == 'anthropic-messages' || provider.id == 'natdev'}
               <label class=over>
                 <b>API key</b>
                 <input type=text bind:value={endpoint.key} placeholder="API key">
@@ -392,6 +398,23 @@
               <label class=over>
                 <b>Base URL</b>
                 <input type=text bind:value={endpoint.url} placeholder="Base URL">
+              </label>
+            {:else if provider.id == 'azure-openai-chat'}
+              <label class=over>
+                <b>API key</b>
+                <input type=text bind:value={endpoint.key} placeholder="API key">
+              </label>
+              <label class=over>
+                <b>API Version</b>
+                <input type=text bind:value={endpoint.apiVersion} placeholder="API Version">
+              </label>
+              <label class=over>
+                <b>Resource</b>
+                <input type=text bind:value={endpoint.resource} placeholder="Resource">
+              </label>
+              <label class=over>
+                <b>Deployment</b>
+                <input type=text bind:value={endpoint.deployment} placeholder="Deployment">
               </label>
             {:else if provider.id == 'steamship-plugin'}
               <label class=over>
@@ -420,7 +443,13 @@
                 <input type=text bind:value={endpoint.model} placeholder="Model name" list="{provider.id}-models">
               </label>
             {/if}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-chat'}
+            {#if provider.id == 'openai-chat'}
+              <label class=side>
+                <input type=checkbox bind:checked={endpoint.rawUrl}>
+                <b>Raw URL</b>
+              </label>
+            {/if}
+            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'azure-openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-text' || provider.id == 'anthropic-messages'}
               <label class=side>
                 <input type=checkbox bind:checked={endpoint.stream}>
                 <b>Stream</b>

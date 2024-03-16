@@ -6,7 +6,8 @@ import {
   AI_PROMPT as AnthropicAssistantPrompt,
   HUMAN_PROMPT as AnthropicHumanPrompt,
 } from "@anthropic-ai/sdk";
-import OpenAI from 'openai';
+import { OpenAI } from 'openai';
+//import { OpenAIClient as AzureOpenAIClient, AzureKeyCredential } from "@azure/openai";
 import { delay, timeout, generateUuid, parseFloatOrNull, parseIntOrNull } from './utils'
 
 export class AIConnectionFactory {
@@ -37,15 +38,54 @@ export class AIConnectionFactory {
       ),
       new AIConnectionFactory(
         'openai-chat', "OpenAI Chat", OpenAIChatProvider,
-        { key: "", url: "", model: "", stream: false },
+        { key: "", url: "", model: "", stream: false, rawUrl: false },
         [ 'user', 'assistant', 'system' ],
-        [ 'gpt-4', 'gpt-4-32k', 'gpt-3.5-turbo' ],
+        [
+          // https://platform.openai.com/docs/models
+          // https://github.com/openai/openai-node/blob/master/src/resources/chat/completions.ts
+          'gpt-4-1106-preview', 'gpt-4-vision-preview', // gpt-4 turbo 128k
+          'gpt-4', 'gpt-4-0314', 'gpt-4-0613', 'gpt-4-32k', 'gpt-4-32k-0314', 'gpt-4-32k-0613', // gpt-4 8k / 16k
+          'gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k', // gpt-3.5 16k
+          'gpt-3.5-turbo', // gpt-3.5 4k
+          'gpt-3.5-turbo-0301', 'gpt-3.5-turbo-0613', 'gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k-0613', // legacy gpt-3.5
+          // Compat
+          'gemini-pro', 'mistral-medium'
+        ],
       ),
       new AIConnectionFactory(
-        'anthropic-chat', "Anthropic", AnthropicChatProvider,
+        'azure-openai-chat', "Azure OpenAI Chat", AzureOpenAIChatProvider,
+        { key: "", resource: "", deployment: "", apiVersion: "", stream: false },
+        [ 'user', 'assistant', 'system' ],
+        [],
+      ),
+      new AIConnectionFactory(
+        'anthropic-text', "Anthropic Text", AnthropicTextProvider,
         { key: "", url: "", model: "", stream: false },
         [ 'human', 'assistant', 'system' ],
-        [ 'claude-v1', 'claude-v1.0', 'claude-v1.2', 'claude-v1.3', 'claude-instant-v1', 'claude-instant-v1.0' ],
+        [
+          'claude-1.0', 'claude-1.2', 'claude-1.3', // claude-1
+          'claude-1.3-100k', // claude-1 100k
+          'claude-instant-1.0', 'claude-instant-1.1', 'claude-instant-1.2', // claude-instant
+          'claude-instant-1-100k', 'claude-instant-1.1-100k', // claude-instant 100k
+          'claude-2.0', 'claude-2.1', // claude-2 100k / 200k
+          // AWS
+          'anthropic.claude-v1', 'anthropic.claude-v2', 'anthropic.claude-v2:1',
+        ],
+      ),
+      new AIConnectionFactory(
+        'anthropic-messages', "Anthropic Messages", AnthropicMessagesProvider,
+        { key: "", url: "", model: "", stream: false },
+        [ 'user', 'assistant', 'system' ],
+        [
+          'claude-3-opus-20240229',
+          'claude-3-sonnet-20240229',
+          'claude-3-haiku-20240307',
+          // AWS
+          'anthropic.claude-v2', 'anthropic.claude-v2:1',
+          'anthropic.claude-3-sonnet-20240229-v1:0',
+          'anthropic.claude-3-haiku-20240307-v1:0',
+          'anthropic.claude-instant-v1',
+        ],
       ),
       new AIConnectionFactory(
         'natdev', "Nat.dev", NatDevChatProvider,
@@ -201,11 +241,17 @@ export class EmptyAIProvider extends AIProvider {
 
 export class OpenAITextProvider extends AIProvider {
   async sendRequest(state) {
+    const rawFetch = (url, opts) => {
+      opts.headers['Api-Key'] = this.config.key;
+      return this.fetch(this.config.rawUrl ? this.config.url : url, opts);
+    };
     const client = new OpenAI({
       apiKey: this.config.key,
       baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.openai.com'),
       dangerouslyAllowBrowser: true,
+      fetch: rawFetch,
     });
+    client.config = this.config;
     const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
       prompt: allMessages.map(m => `${m.text}\n\n`).join(""),
@@ -236,6 +282,13 @@ export class OpenAITextProvider extends AIProvider {
 
 export class OpenAIChatProvider extends AIProvider {
   async sendRequest(state) {
+    const rawFetch = (url, opts) => {
+      if (this.config.key != "-")
+        opts.headers['Api-Key'] = this.config.key;
+      else
+        delete opts.headers['Authorization'];
+      return this.fetch(this.config.rawUrl ? this.config.url : url, opts);
+    };
     const getMessageRole = r =>
       (r || '').match(/system/i) ? 'system' :
       (r || '').match(/user|human/i) ? 'user' : 'assistant';
@@ -243,7 +296,9 @@ export class OpenAIChatProvider extends AIProvider {
       apiKey: this.config.key,
       baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.openai.com'),
       dangerouslyAllowBrowser: true,
+      fetch: rawFetch,
     });
+    client.config = this.config;
     const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
       messages: allMessages.map(m => ({
@@ -275,7 +330,46 @@ export class OpenAIChatProvider extends AIProvider {
   }
 }
 
-export class AnthropicChatProvider extends AIProvider {
+export class AzureOpenAIChatProvider extends AIProvider {
+  async sendRequest(state) {
+    const getMessageRole = r =>
+      (r || '').match(/system/i) ? 'system' :
+      (r || '').match(/user|human/i) ? 'user' : 'assistant';
+    const client = new AzureOpenAIClient(
+      this.proxy.modifyUrl(`https://${this.config.resource}.openai.azure.com/`),
+      new AzureKeyCredential(this.config.key), {
+        apiVersion: this.config.apiVersion,
+      });
+    const messages = state.messages.filter(m => m.text?.length > 0).map(m => ({
+      role: getMessageRole(m.role),
+      content: m.text,
+    }));
+    const params = {
+      maxTokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      frequencyPenalty: this.config.frequencyPenalty,
+      presencePenalty: this.config.presencePenalty,
+      abortSignal: state.signal,
+    };
+    let response = null;
+    try {
+      if (this.config.stream) {
+        const stream = await client.streamChatCompletions(this.config.deployment, messages, params);
+        state.signal.addEventListener('abort', () => stream.cancel());
+        for await (const message of stream)
+          this.raiseMessage({ text: message.choices[0]?.delta?.content ?? "", role: 'assistant', mode: 'append' });
+        return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
+      } else {
+        const message = await client.getChatCompletions(this.config.deployment, messages, params);
+        return this.raiseMessage({ text: message.choices[0]?.message?.content ?? "", role: 'assistant', mode: 'complete' });
+      }
+    } catch (ex) {
+      return this.raiseError("Query failed", ex, state, response);
+    }
+  }
+}
+
+export class AnthropicTextProvider extends AIProvider {
   async sendRequest(state) {
     const getMessageRole = r =>
       (r || '').match(/system/i) ? "" :
@@ -307,6 +401,65 @@ export class AnthropicChatProvider extends AIProvider {
       } else {
         const message = await client.completions.create({ ...params, stream: false });
         return this.raiseMessage({ text: message.completion, role: 'assistant', mode: 'complete' });
+      }
+    } catch (ex) {
+      return this.raiseError("Query failed", ex, state, response);
+    }
+  }
+}
+
+export class AnthropicMessagesProvider extends AIProvider {
+  async sendRequest(state) {
+    const getMessageRole = r =>
+      (r || '').match(/system/i) ? 'system' :
+      (r || '').match(/user|human/i) ? 'user' : 'assistant';
+    const myFetch = (url, opts) => this.fetch(url, opts);
+    const client = new AnthropicClient({
+      apiKey: this.config.key,
+      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
+      fetch: myFetch,
+    });
+    const allMessages = state.messages.filter(m => m.text?.length > 0);
+    const params = {
+      messages: allMessages.filter(m => getMessageRole(m.role) != 'system').map(m => ({
+        role: getMessageRole(m.role),
+        content: m.text.trimRight(),
+      })),
+      system: allMessages.filter(m => getMessageRole(m.role) == 'system').map(m => m.text).join("\n").trim(),
+      model: this.config.model,
+      max_tokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      //top_p: -1,
+      //top_k: -1,
+    };
+    let response = null;
+    try {
+      if (this.config.stream) {
+        const stream = await client.messages.create({ ...params, stream: true }).withResponse();
+        response = stream.response;
+        state.signal.addEventListener('abort', () => stream.data.controller.abort());
+        for await (const message of stream.data) {
+          switch (message.type) {
+            case 'content_block_delta':
+              this.raiseMessage({ text: message?.delta?.text ?? "", role: 'assistant', mode: 'append' });
+              break;
+            case 'message_start':
+              this.raiseLogMessage({ text: `Message sent (input: ${message.usage?.input_tokens} tokens)`, data: [ message ]})
+              break;
+            case 'message_stop':
+              this.raiseLogMessage({ text: `Message received (input: ${message.inputTokenCount} tokens, output: ${message.outputTokenCount})`, data: [ message ]})
+              break;
+            default:
+              this.raiseLogMessage({ text: `Event ${message.type}`, data: [ message ]})
+              break;
+          }
+          console.log("event", message);
+        }
+        return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
+      } else {
+        const message = await client.messages.create({ ...params, stream: false }).withResponse();
+        response = message.response;
+        return this.raiseMessage({ text: message.data.content, role: 'assistant', mode: 'complete' });
       }
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
