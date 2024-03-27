@@ -2,7 +2,6 @@
 
 import {
   Anthropic as AnthropicClient,
-  Config as AnthropicConfig,
   AI_PROMPT as AnthropicAssistantPrompt,
   HUMAN_PROMPT as AnthropicHumanPrompt,
 } from "@anthropic-ai/sdk";
@@ -413,11 +412,10 @@ export class AnthropicMessagesProvider extends AIProvider {
     const getMessageRole = r =>
       (r || '').match(/system/i) ? 'system' :
       (r || '').match(/user|human/i) ? 'user' : 'assistant';
-    const myFetch = (url, opts) => this.fetch(url, opts);
     const client = new AnthropicClient({
       apiKey: this.config.key,
       baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
-      fetch: myFetch,
+      fetch: (url, opts) => this.fetch(url, opts),
     });
     const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
