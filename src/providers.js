@@ -1,13 +1,6 @@
 'use strict'
 
-import {
-  Anthropic as AnthropicClient,
-  AI_PROMPT as AnthropicAssistantPrompt,
-  HUMAN_PROMPT as AnthropicHumanPrompt,
-} from "@anthropic-ai/sdk";
-import { OpenAI } from 'openai';
-//import { OpenAIClient as AzureOpenAIClient, AzureKeyCredential } from "@azure/openai";
-import { delay, timeout, generateUuid, parseFloatOrNull, parseIntOrNull, events } from './utils'
+import { delay, timeout, generateUuid, parseFloatOrNull, parseIntOrNull, parseJSONOrNull, events } from './utils'
 
 export class AIConnectionFactory {
   static providers = [];
@@ -179,6 +172,10 @@ export class AIProvider {
     Object.assign(this, { config, proxy });
   }
 
+  get keyHeader() {
+    return 'Authorization';
+  }
+
   async sendRequest(state) {
     return { error: "Provider not implemented" };
   }
@@ -187,8 +184,24 @@ export class AIProvider {
     return rawUrl || url.endsWith(postfix) ? url : url.endsWith("/") ? `${url}${postfix}` : `${url}/${postfix}`;
   }
 
-  async fetch(input, init) {
-    const response = await fetch(input, init);
+  createFetchJsonOptions(signal, data){
+    const options = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      signal,
+    };
+    const [ key, keyHeader ] = [ this.config.key, this.keyHeader ];
+    if (key?.length > 0 && keyHeader?.length > 0)
+      options.headers[keyHeader] = keyHeader == 'Authorization' ? `Bearer ${key}` : key;
+    this.setExtraHeaders(options.headers);
+    return options;
+  }
+
+  setExtraHeaders(headers) { }
+
+  async fetch(url, options) {
+    const response = await fetch(this.config.rawUrl ? this.config.url : url, options);
     const headers = {};
     response.headers.forEach((v, k) => headers[k] = v);
     console.log("Received HTTP response:", response, "headers:", headers);
@@ -204,7 +217,7 @@ export class AIProvider {
       this.raiseError("Failed to decode message", ex, state, response);
       return false;
     }
-    try{
+    try {
       return await this.handleJson(JSON.parse(text), state, response);
     }
     catch (ex) {
@@ -245,18 +258,8 @@ export class EmptyAIProvider extends AIProvider {
 
 export class OpenAITextProvider extends AIProvider {
   async sendRequest(state) {
-    const rawFetch = (url, opts) => {
-      opts.headers['Api-Key'] = this.config.key;
-      return this.fetch(this.config.rawUrl ? this.config.url : url, opts);
-    };
-    const client = new OpenAI({
-      apiKey: this.config.key,
-      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.openai.com'),
-      dangerouslyAllowBrowser: true,
-      fetch: rawFetch,
-    });
-    client.config = this.config;
-    const params = {
+    const url = this.appendURL(this.proxy.modifyUrl(this.config.url || "https://api.openai.com"), "v1/completions");
+    const options = this.createFetchJsonOptions(state.signal, {
       prompt: state.messages.map(m => `${m.text}\n\n`).join(""),
       model: this.config.model,
       max_tokens: this.config.maxTokens,
@@ -264,19 +267,32 @@ export class OpenAITextProvider extends AIProvider {
       frequency_penalty: this.config.frequencyPenalty,
       presence_penalty: this.config.presencePenalty,
       //top_p: null,
-    };
+    });
     let response = null;
     try {
-      if (this.config.stream) {
-        const stream = await client.completions.create({ ...params, stream: true });
-        state.signal.addEventListener('abort', () => stream.controller.abort());
-        for await (const message of stream)
-          this.raiseMessage({ text: message.choices[0]?.text ?? "", role: 'assistant', mode: 'append' });
-        return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
-      } else {
-        const message = await client.completions.create({ ...params, stream: false });
-        return this.raiseMessage({ text: message.choices[0]?.text ?? "", role: 'assistant', mode: 'complete' });
+      response = await this.fetch(url, options);
+      if (!response.ok) {
+        const text = await response.text();
+        const message = parseJSONOrNull(text);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
       }
+      if (this.config.stream) {
+        for await (const event of events(response, options.signal)) {
+          const message = event.json;
+          switch (message?.object) {
+            case 'text_completion':
+              this.raiseMessage({ text: message.choices?.[0]?.text ?? "", role: 'assistant', mode: 'append', data: [ message ] });
+              break;
+            default:
+              this.raiseLogMessage({ text: `Event ${message?.object ?? "?"}`, data: [ event ]});
+              break;
+          }
+        }
+      } else {
+        const message = await response.json();
+        return this.raiseMessage({ text: message.choices?.[0]?.text ?? "", role: 'assistant', mode: 'complete' });
+      }
+      return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
     }
@@ -285,24 +301,11 @@ export class OpenAITextProvider extends AIProvider {
 
 export class OpenAIChatProvider extends AIProvider {
   async sendRequest(state) {
-    const rawFetch = (url, opts) => {
-      if (this.config.key != "-")
-        opts.headers['Api-Key'] = this.config.key;
-      else
-        delete opts.headers['Authorization'];
-      return this.fetch(this.config.rawUrl ? this.config.url : url, opts);
-    };
     const getMessageRole = r =>
       (r || '').match(/system/i) ? 'system' :
       (r || '').match(/user|human/i) ? 'user' : 'assistant';
-    const client = new OpenAI({
-      apiKey: this.config.key,
-      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.openai.com'),
-      dangerouslyAllowBrowser: true,
-      fetch: rawFetch,
-    });
-    client.config = this.config;
-    const params = {
+    const url = this.appendURL(this.proxy.modifyUrl(this.config.url || "https://api.openai.com"), "v1/chat/completions");
+    const options = this.createFetchJsonOptions(state.signal, {
       messages: state.messages.map(m => ({
         role: getMessageRole(m.role),
         content: m.text,
@@ -312,19 +315,33 @@ export class OpenAIChatProvider extends AIProvider {
       temperature: this.config.temperature,
       frequency_penalty: this.config.frequencyPenalty,
       presence_penalty: this.config.presencePenalty,
+      stream: this.config.stream,
       //top_p: null,
-    };
+    });
     let response = null;
     try {
+      response = await this.fetch(url, options);
+      if (!response.ok) {
+        const text = await response.text();
+        const message = parseJSONOrNull(text);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
+      }
       if (this.config.stream) {
-        const stream = await client.chat.completions.create({ ...params, stream: true });
-        state.signal.addEventListener('abort', () => stream.controller.abort());
-        for await (const message of stream)
-          this.raiseMessage({ text: message.choices[0]?.delta?.content ?? "", role: 'assistant', mode: 'append' });
+        for await (const event of events(response, options.signal)) {
+          const message = event.json;
+          switch (message?.object) {
+            case 'chat.completion.chunk':
+              this.raiseMessage({ text: message.choices?.[0]?.delta?.content ?? "", role: 'assistant', mode: 'append', data: [ message ] });
+              break;
+            default:
+              this.raiseLogMessage({ text: `Event ${message?.object ?? "?"}`, data: [ event ]});
+              break;
+          }
+        }
         return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
       } else {
-        const message = await client.chat.completions.create({ ...params, stream: false });
-        return this.raiseMessage({ text: message.choices[0]?.message?.content ?? "", role: 'assistant', mode: 'complete' });
+        const message = await response.json();
+        return this.raiseMessage({ text: message.choices?.[0]?.message?.content ?? "", role: 'assistant', mode: 'complete' });
       }
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
@@ -332,7 +349,11 @@ export class OpenAIChatProvider extends AIProvider {
   }
 }
 
-export class AzureOpenAIChatProvider extends AIProvider {
+export class AzureOpenAIChatProvider extends OpenAIChatProvider {
+  get keyHeader() {
+    return 'Api-Key';
+  }
+
   async sendRequest(state) {
     const getMessageRole = r =>
       (r || '').match(/system/i) ? 'system' :
@@ -371,37 +392,62 @@ export class AzureOpenAIChatProvider extends AIProvider {
   }
 }
 
-export class AnthropicTextProvider extends AIProvider {
+export class AnthropicProvider extends AIProvider {
+  get keyHeader(){
+    return 'X-Api-Key';
+  }
+
+  setExtraHeaders(headers) {
+    headers['Anthropic-Version'] = "2023-06-01";
+  }
+}
+
+export class AnthropicTextProvider extends AnthropicProvider {
   async sendRequest(state) {
+    const [ humanPrompt, assistentPrompt ] = [ "\n\nHuman:", "\n\nAssistant:" ];
     const getMessageRole = r =>
       (r || '').match(/system/i) ? "" :
-      (r || '').match(/user|human/i) ? AnthropicHumanPrompt : AnthropicAssistantPrompt;
-    const client = new AnthropicClient({
-      apiKey: this.config.key,
-      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
-      maxRetries: 0,
-    });
-    const params = {
-      prompt: state.messages.map(m => `${getMessageRole(m.role)}${m.text}`).join("") +
-        (getMessageRole(state.messages.at(-1)?.role) == AnthropicAssistantPrompt ? "" : AnthropicAssistantPrompt),
+      (r || '').match(/user|human/i) ? humanPrompt : assistentPrompt;
+    const url = this.appendURL(this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'), "v1/complete");
+    const options = this.createFetchJsonOptions(state.signal, {
+      prompt:
+        state.messages.map(m => `${getMessageRole(m.role)} ${m.text}`).join("") +
+        (getMessageRole(state.messages.at(-1)?.role) == assistentPrompt ? "" : assistentPrompt),
       model: this.config.model,
       max_tokens_to_sample: this.config.maxTokens,
       temperature: this.config.temperature,
       //top_p: -1,
       //top_k: -1,
-      stop_sequences: [ AnthropicHumanPrompt ],
-    };
+      stop_sequences: [ humanPrompt ],
+      stream: this.config.stream,
+    });
     let response = null;
     try {
+      response = await this.fetch(url, options);
+      if (!response.ok) {
+        const text = await response.text();
+        const message = parseJSONOrNull(text);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
+      }
       if (this.config.stream) {
-        const stream = await client.completions.create({ ...params, stream: true });
-        response = stream.response;
-        state.signal.addEventListener('abort', () => stream.controller.abort());
-        for await (const message of stream)
-          this.raiseMessage({ text: message.completion, role: 'assistant', mode: 'append' });
+        const stream = events(response, options.signal);
+        for await (const event of stream) {
+          const message = event.json;
+          switch (event.type ?? message?.type) {
+            case 'completion':
+              this.raiseMessage({ text: message.completion ?? "", role: 'assistant', mode: 'append', data: [ message ] });
+              break;
+            case 'error':
+              this.raiseError("Received error", new Error(message?.error?.message), state, response);
+              break;
+            default:
+              this.raiseLogMessage({ text: `Event ${message?.type ?? "?"}`, data: [ event ]});
+              break;
+          }
+        }
         return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
       } else {
-        const message = await client.completions.create({ ...params, stream: false });
+        const message = await response.json();
         return this.raiseMessage({ text: message.completion, role: 'assistant', mode: 'complete' });
       }
     } catch (ex) {
@@ -410,56 +456,39 @@ export class AnthropicTextProvider extends AIProvider {
   }
 }
 
-export class AnthropicMessagesProvider extends AIProvider {
+export class AnthropicMessagesProvider extends AnthropicProvider {
   async sendRequest(state) {
     const getMessageRole = r =>
       (r || '').match(/system/i) ? 'system' :
       (r || '').match(/user|human/i) ? 'user' : 'assistant';
-    /*const client = new AnthropicClient({
-      apiKey: this.config.key,
-      baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
-      maxRetries: 0,
-      fetch: (url, opts) => this.fetch(url, opts),
-    });*/
     const url = this.appendURL(this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'), "v1/messages");
-    const options = {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.key}`,
-      },
-      body: JSON.stringify({
-        messages: state.messages.filter(m => getMessageRole(m.role) != 'system').map(m => ({
-          role: getMessageRole(m.role),
-          content: m.text.trimRight(),
-        })),
-        system: state.messages.filter(m => getMessageRole(m.role) == 'system').map(m => m.text).join("\n").trim(),
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        temperature: this.config.temperature,
-        //top_p: -1,
-        //top_k: -1,
-        stream: this.config.stream,
-      }),
-      signal: state.signal,
-    };
+    const options = this.createFetchJsonOptions(state.signal, {
+      messages: state.messages.filter(m => getMessageRole(m.role) != 'system').map(m => ({
+        role: getMessageRole(m.role),
+        content: m.text.trimRight(),
+      })),
+      system: state.messages.filter(m => getMessageRole(m.role) == 'system').map(m => m.text).join("\n").trim(),
+      model: this.config.model,
+      max_tokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+      //top_p: -1,
+      //top_k: -1,
+      stream: this.config.stream,
+    });
     let response = null;
     try {
       response = await this.fetch(url, options);
       if (!response.ok) {
-        let message = null;
-        try {
-          message = await response.json();
-        } catch { }
-        return this.raiseError("Query failed", new Error(message?.error?.message), state, response);
+        const text = await response.text();
+        const message = parseJSONOrNull(text);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
       }
       if (this.config.stream) {
-        const stream = events(response, options.signal);
-        for await (const event of stream) {
+        for await (const event of events(response, options.signal)) {
           const message = event.json;
-          switch (message.type) {
+          switch (event.type ?? message?.type) {
             case 'content_block_delta':
-              this.raiseMessage({ text: message.delta?.text ?? "", role: 'assistant', mode: 'append' });
+              this.raiseMessage({ text: message.delta?.text ?? "", role: 'assistant', mode: 'append', data: [ message ] });
               break;
             case 'message_start':
               const info = message.message ?? message;
@@ -471,15 +500,18 @@ export class AnthropicMessagesProvider extends AIProvider {
               const outputTokenCount = message.outputTokenCount ?? bedrockMetrics?.outputTokenCount;
               this.raiseLogMessage({ text: `Message stop (input: ${inputTokenCount} tokens, output: ${outputTokenCount})`, data: [ message ]})
               break;
+            case 'error':
+              this.raiseError("Received error", new Error(message?.error?.message), state, response);
+              break;
             default:
-              this.raiseLogMessage({ text: `Event ${message.type}`, data: [ message ]})
+              this.raiseLogMessage({ text: `Event ${message?.type ?? "?"}`, data: [ event ]});
               break;
           }
         }
         return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
       } else {
         const message = await response.json();
-        return this.raiseMessage({ text: message.data.content, role: 'assistant', mode: 'complete' });
+        return this.raiseMessage({ text: message.content?.text, role: 'assistant', mode: 'complete' });
       }
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
