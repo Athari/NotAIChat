@@ -22,6 +22,14 @@ export function parseIntOrNull(s) {
   return !Number.isNaN(r) && Number.isFinite(r) ? r : null;
 }
 
+export function parseJSONOrNull(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
 export function generateUuid() {
   try {
     return crypto.randomUUID();
@@ -100,4 +108,114 @@ export function uploadFile(type) {
     }, { once: true });
     elUploadFile.click();
   });
+}
+
+export async function* events(res, signal) {
+  if (!res.body)
+    return;
+  const iter = streamToAsyncIterator(res.body
+    .pipeThrough(new TextDecoderStream())
+    .pipeThrough(new TextLineStream({ allowCR: true })));
+
+  let event = null;
+  for await (const line of iter) {
+    if (signal && signal.aborted)
+      break;
+
+    if (line.length == 0) {
+      if (event != null) {
+        if (event.data?.length > 0)
+          event.json = parseJSONOrNull(event.data);
+        yield event;
+      }
+      event = null;
+      continue;
+    }
+
+    const match = /[:]\s*/.exec(line);
+    if (!(match?.index > 0))
+      continue;
+    const field = line.substring(0, match.index);
+    const value = line.substring(match.index + match[0].length);
+
+    if (field == 'data') {
+      event ||= {};
+      event[field] = event[field]?.length > 0 ? `${event[field]}\n${value}` : value;
+    }
+    else if (field == 'event') {
+      event ||= {};
+      event[field] = value;
+    }
+    else if (field == 'id') {
+      event ||= {};
+      event[field] = +value || value;
+    }
+    else if (field == 'retry') {
+      event ||= {};
+      event[field] = +value || undefined;
+    }
+  }
+}
+
+export async function stream(input, init) {
+  let req = new Request(input, init);
+  fallback(req.headers, 'Accept', 'text/event-stream');
+  fallback(req.headers, 'Content-Type', 'application/json');
+  return events(await fetch(req), req.signal);
+  
+  function fallback(headers, key, value) {
+    if (!headers.get(key))
+      headers.set(key, value);
+  }
+}
+
+async function* streamToAsyncIterator(stream) {
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done)
+        return;
+      yield value;
+    }
+  }
+  finally {
+    reader.releaseLock();
+  }
+}
+
+class TextLineStream extends TransformStream {
+  #currentLine = "";
+
+  constructor(options = { allowCR: false }) {
+    super({
+      transform: (chars, controller) => {
+        chars = this.#currentLine + chars;
+        while (true) {
+          const lfIndex = chars.indexOf("\n");
+          const crIndex = options.allowCR ? chars.indexOf("\r") : -1;
+          if (
+            crIndex !== -1 && crIndex !== (chars.length - 1) &&
+            (lfIndex === -1 || (lfIndex - 1) > crIndex)
+          ) {
+            controller.enqueue(chars.slice(0, crIndex));
+            chars = chars.slice(crIndex + 1);
+            continue;
+          }
+          if (lfIndex === -1)
+            break;
+          const endIndex = chars[lfIndex - 1] === "\r" ? lfIndex - 1 : lfIndex;
+          controller.enqueue(chars.slice(0, endIndex));
+          chars = chars.slice(lfIndex + 1);
+        }
+        this.#currentLine = chars;
+      },
+      flush: (controller) => {
+        if (this.#currentLine === "") return;
+        const currentLine = options.allowCR && this.#currentLine.endsWith("\r")
+          ? this.#currentLine.slice(0, -1) : this.#currentLine;
+        controller.enqueue(currentLine);
+      },
+    });
+  }
 }

@@ -7,7 +7,7 @@ import {
 } from "@anthropic-ai/sdk";
 import { OpenAI } from 'openai';
 //import { OpenAIClient as AzureOpenAIClient, AzureKeyCredential } from "@azure/openai";
-import { delay, timeout, generateUuid, parseFloatOrNull, parseIntOrNull } from './utils'
+import { delay, timeout, generateUuid, parseFloatOrNull, parseIntOrNull, events } from './utils'
 
 export class AIConnectionFactory {
   static providers = [];
@@ -42,7 +42,8 @@ export class AIConnectionFactory {
         [
           // https://platform.openai.com/docs/models
           // https://github.com/openai/openai-node/blob/master/src/resources/chat/completions.ts
-          'gpt-4-1106-preview', 'gpt-4-vision-preview', // gpt-4 turbo 128k
+          'gpt-4-0125-preview', 'gpt-4-1106-preview', 'gpt-4-turbo-preview', // gpt-4 turbo 128k
+          'gpt-4-1106-vision-preview', 'gpt-4-vision-preview', // gpt-4 turbo 128k vision
           'gpt-4', 'gpt-4-0314', 'gpt-4-0613', 'gpt-4-32k', 'gpt-4-32k-0314', 'gpt-4-32k-0613', // gpt-4 8k / 16k
           'gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k', // gpt-3.5 16k
           'gpt-3.5-turbo', // gpt-3.5 4k
@@ -182,6 +183,10 @@ export class AIProvider {
     return { error: "Provider not implemented" };
   }
 
+  appendURL(url, postfix, rawUrl = false) {
+    return rawUrl || url.endsWith(postfix) ? url : url.endsWith("/") ? `${url}${postfix}` : `${url}/${postfix}`;
+  }
+
   async fetch(input, init) {
     const response = await fetch(input, init);
     const headers = {};
@@ -251,9 +256,8 @@ export class OpenAITextProvider extends AIProvider {
       fetch: rawFetch,
     });
     client.config = this.config;
-    const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
-      prompt: allMessages.map(m => `${m.text}\n\n`).join(""),
+      prompt: state.messages.map(m => `${m.text}\n\n`).join(""),
       model: this.config.model,
       max_tokens: this.config.maxTokens,
       temperature: this.config.temperature,
@@ -298,9 +302,8 @@ export class OpenAIChatProvider extends AIProvider {
       fetch: rawFetch,
     });
     client.config = this.config;
-    const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
-      messages: allMessages.map(m => ({
+      messages: state.messages.map(m => ({
         role: getMessageRole(m.role),
         content: m.text,
       })),
@@ -339,7 +342,7 @@ export class AzureOpenAIChatProvider extends AIProvider {
       new AzureKeyCredential(this.config.key), {
         apiVersion: this.config.apiVersion,
       });
-    const messages = state.messages.filter(m => m.text?.length > 0).map(m => ({
+    const messages = state.messages.map(m => ({
       role: getMessageRole(m.role),
       content: m.text,
     }));
@@ -376,11 +379,11 @@ export class AnthropicTextProvider extends AIProvider {
     const client = new AnthropicClient({
       apiKey: this.config.key,
       baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
+      maxRetries: 0,
     });
-    const allMessages = state.messages.filter(m => m.text?.length > 0);
     const params = {
-      prompt: allMessages.map(m => `${getMessageRole(m.role)}${m.text}`).join("") +
-        (getMessageRole(allMessages.at(-1)?.role) == AnthropicAssistantPrompt ? "" : AnthropicAssistantPrompt),
+      prompt: state.messages.map(m => `${getMessageRole(m.role)}${m.text}`).join("") +
+        (getMessageRole(state.messages.at(-1)?.role) == AnthropicAssistantPrompt ? "" : AnthropicAssistantPrompt),
       model: this.config.model,
       max_tokens_to_sample: this.config.maxTokens,
       temperature: this.config.temperature,
@@ -412,51 +415,70 @@ export class AnthropicMessagesProvider extends AIProvider {
     const getMessageRole = r =>
       (r || '').match(/system/i) ? 'system' :
       (r || '').match(/user|human/i) ? 'user' : 'assistant';
-    const client = new AnthropicClient({
+    /*const client = new AnthropicClient({
       apiKey: this.config.key,
       baseURL: this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'),
+      maxRetries: 0,
       fetch: (url, opts) => this.fetch(url, opts),
-    });
-    const allMessages = state.messages.filter(m => m.text?.length > 0);
-    const params = {
-      messages: allMessages.filter(m => getMessageRole(m.role) != 'system').map(m => ({
-        role: getMessageRole(m.role),
-        content: m.text.trimRight(),
-      })),
-      system: allMessages.filter(m => getMessageRole(m.role) == 'system').map(m => m.text).join("\n").trim(),
-      model: this.config.model,
-      max_tokens: this.config.maxTokens,
-      temperature: this.config.temperature,
-      //top_p: -1,
-      //top_k: -1,
+    });*/
+    const url = this.appendURL(this.proxy.modifyUrl(this.config.url || 'https://api.anthropic.com'), "v1/messages");
+    const options = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.key}`,
+      },
+      body: JSON.stringify({
+        messages: state.messages.filter(m => getMessageRole(m.role) != 'system').map(m => ({
+          role: getMessageRole(m.role),
+          content: m.text.trimRight(),
+        })),
+        system: state.messages.filter(m => getMessageRole(m.role) == 'system').map(m => m.text).join("\n").trim(),
+        model: this.config.model,
+        max_tokens: this.config.maxTokens,
+        temperature: this.config.temperature,
+        //top_p: -1,
+        //top_k: -1,
+        stream: this.config.stream,
+      }),
+      signal: state.signal,
     };
     let response = null;
     try {
+      response = await this.fetch(url, options);
+      if (!response.ok) {
+        let message = null;
+        try {
+          message = await response.json();
+        } catch { }
+        return this.raiseError("Query failed", new Error(message?.error?.message), state, response);
+      }
       if (this.config.stream) {
-        const stream = await client.messages.create({ ...params, stream: true }).withResponse();
-        response = stream.response;
-        state.signal.addEventListener('abort', () => stream.data.controller.abort());
-        for await (const message of stream.data) {
+        const stream = events(response, options.signal);
+        for await (const event of stream) {
+          const message = event.json;
           switch (message.type) {
             case 'content_block_delta':
-              this.raiseMessage({ text: message?.delta?.text ?? "", role: 'assistant', mode: 'append' });
+              this.raiseMessage({ text: message.delta?.text ?? "", role: 'assistant', mode: 'append' });
               break;
             case 'message_start':
-              this.raiseLogMessage({ text: `Message sent (input: ${message.usage?.input_tokens} tokens)`, data: [ message ]})
+              const info = message.message ?? message;
+              this.raiseLogMessage({ text: `Message start (model: ${info.model}, input: ${info.usage?.input_tokens} tokens)`, data: [ message ]})
               break;
             case 'message_stop':
-              this.raiseLogMessage({ text: `Message received (input: ${message.inputTokenCount} tokens, output: ${message.outputTokenCount})`, data: [ message ]})
+              const bedrockMetrics = message['amazon-bedrock-invocationMetrics'];
+              const inputTokenCount = message.inputTokenCount ?? bedrockMetrics?.inputTokenCount;
+              const outputTokenCount = message.outputTokenCount ?? bedrockMetrics?.outputTokenCount;
+              this.raiseLogMessage({ text: `Message stop (input: ${inputTokenCount} tokens, output: ${outputTokenCount})`, data: [ message ]})
               break;
             default:
               this.raiseLogMessage({ text: `Event ${message.type}`, data: [ message ]})
               break;
           }
-          console.log("event", message);
         }
         return this.raiseMessage({ text: "", role: 'assistant', mode: 'done' });
       } else {
-        const message = await client.messages.create({ ...params, stream: false }).withResponse();
-        response = message.response;
+        const message = await response.json();
         return this.raiseMessage({ text: message.data.content, role: 'assistant', mode: 'complete' });
       }
     } catch (ex) {
@@ -580,10 +602,9 @@ export class SteamShipPluginProvider extends AIProvider {
     const pollDelayMs = 2000;
 
     // Plugin: instance: create
-    const allMessages = state.messages.filter(m => m.text?.length > 0);
     let [ response, json ] = await this.callApi(state, 'plugin/instance/generate', {
       appendOutputToFile: false,
-      text: allMessages.map(m => m.text).join("\n"),
+      text: state.messages.map(m => m.text).join("\n"),
       pluginInstance: this.config.workspace,
     })
     if (json === false)
@@ -701,9 +722,8 @@ export class ChatBotKitProvider extends AIProvider {
     let response, json;
 
     // Conversation: create
-    const allMessages = state.messages.filter(m => m.text?.length > 0);
-    const chatMessages = allMessages.filter(m => !isSystemRole(m.role));
-    const systemMessages = allMessages.filter(m => isSystemRole(m.role));
+    const chatMessages = state.messages.filter(m => !isSystemRole(m.role));
+    const systemMessages = state.messages.filter(m => isSystemRole(m.role));
     const prevMessages = chatMessages.slice(0, -1);
     [ response, json ] = await this.callApi(state, 'conversation/create', {
       backstory: systemMessages.map(m => m.text).join("\n"),

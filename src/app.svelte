@@ -163,13 +163,14 @@
 
     controller = new AbortController();
     const lastMessage = messages.at(-1);
+    const allMessages = messages.filter(m => m.text?.length > 0);
     let targetMessage = lastMessage?.text == "" || lastMessage.role == 'assistant' ? lastMessage : null;
     let isTextReceived = false;
     let indexText;
     const state = {
       get signal() { return controller.signal },
       get extraText() { return `${indexText} in ${getPreciseTimeText()}` },
-      get messages() { return messages },
+      get messages() { return allMessages },
     };
     Object.assign(api, {
       onMessage(message) {
