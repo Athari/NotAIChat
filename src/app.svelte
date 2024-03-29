@@ -3,7 +3,7 @@
 
   import { onMount } from 'svelte'
   import Fa from 'svelte-fa'
-  import { loadData, saveData, downloadFile, uploadFile, delay } from './utils'
+  import { loadData, saveData, downloadFile, uploadFile, delay, linkify } from './utils'
   import { AIConnectionFactory } from './providers'
   import { faArrowDown } from '@fortawesome/pro-solid-svg-icons/faArrowDown'
   import { faArrowUp } from '@fortawesome/pro-solid-svg-icons/faArrowUp'
@@ -12,6 +12,7 @@
   import { faFloppyDisk } from '@fortawesome/pro-regular-svg-icons/faFloppyDisk'
   import { faFolderOpen } from '@fortawesome/pro-regular-svg-icons/faFolderOpen'
   import { faPaperPlane } from '@fortawesome/pro-solid-svg-icons/faPaperPlane'
+  import { faPenToSquare } from '@fortawesome/pro-regular-svg-icons/faPenToSquare'
   import { faPlusLarge } from '@fortawesome/pro-solid-svg-icons/faPlusLarge'
   import { faRocketLaunch } from '@fortawesome/pro-regular-svg-icons/faRocketLaunch'
   import { faShareNodes } from '@fortawesome/pro-regular-svg-icons/faShareNodes'
@@ -43,6 +44,7 @@
   let statusText = "Welcome!";
   let controller = null;
   let isLoaded = false;
+  let isEditingConfig = false;
   
   let selectedEndpoint = null;
   let selectedProxy = null;
@@ -276,6 +278,10 @@
     updateTextAreaSizeDelayed({ target: e.target.closest('.message').querySelector('textarea') });
   }
 
+  function toggleEditingConfig() {
+    isEditingConfig = !isEditingConfig;
+  }
+
   function addEndpoint() {
     endpoints = [ ...endpoints, AIConnectionFactory.createDefaultProviderConfig() ];
   }
@@ -367,144 +373,155 @@
   <details open>
     <summary>Options</summary>
     <div class="endpoints">
-      <h3>
-        API Endpoints
-        <button on:click={addEndpoint} title="Add endpoint">
-          <Fa icon={faPlusLarge} {...faTheme} />
-        </button>
-      </h3>
-      {#each endpoints as endpoint, ie}
-        <div class="endpoint">
-          <label class=side>
-            <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
-          </label>
-          <label class=over>
-            <b>Display name</b>
-            <input type=text bind:value={endpoint.name} placeholder="Display name">
-          </label>
-          <label class=over>
-            <b>Provider</b>
-            <select bind:value={endpoint.typeId} placeholder="Provider">
-              {#each AIConnectionFactory.providers as provider}
-                <option value={provider.id}>{provider.displayName}</option>  
-              {/each}
-            </select>
-          </label>
-          {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-text' || provider.id == 'anthropic-messages' || provider.id == 'natdev'}
-              <label class=over>
-                <b>API key</b>
-                <input type=text bind:value={endpoint.key} placeholder="API key">
-              </label>
-              <label class=over>
-                <b>Base URL</b>
-                <input type=text bind:value={endpoint.url} placeholder="Base URL">
-              </label>
-            {:else if provider.id == 'azure-openai-chat'}
-              <label class=over>
-                <b>API key</b>
-                <input type=text bind:value={endpoint.key} placeholder="API key">
-              </label>
-              <label class=over>
-                <b>API Version</b>
-                <input type=text bind:value={endpoint.apiVersion} placeholder="API Version">
-              </label>
-              <label class=over>
-                <b>Resource</b>
-                <input type=text bind:value={endpoint.resource} placeholder="Resource">
-              </label>
-              <label class=over>
-                <b>Deployment</b>
-                <input type=text bind:value={endpoint.deployment} placeholder="Deployment">
-              </label>
-            {:else if provider.id == 'steamship-plugin'}
-              <label class=over>
-                <b>API key</b>
-                <input type=text bind:value={endpoint.key} placeholder="API key">
-              </label>
-              <label class=over>
-                <b>Workspace</b>
-                <input type=text bind:value={endpoint.workspace} placeholder="Workspace">
-              </label>
-            {:else if provider.id == 'scale-spellbook' || provider.id == 'scale-spellbook-fish'}
-              <label class=over>
-                <b>Deployment key</b>
-                <input type=text bind:value={endpoint.key} placeholder="Deployment key">
-              </label>
-              <label class=over>
-                <b>Deployment URL</b>
-                <input type=text bind:value={endpoint.url} placeholder="Deployment URL">
-              </label>
-            {:else}
-              <b>Choose endpoint provider</b>
-            {/if}
-            {#if provider.models.length > 0}
-              <label class=over>
-                <b>Model name</b>
-                <input type=text bind:value={endpoint.model} placeholder="Model name" list="{provider.id}-models">
-              </label>
-            {/if}
-            {#if provider.id == 'openai-chat'}
-              <label class=side>
-                <input type=checkbox bind:checked={endpoint.rawUrl}>
-                <b>Raw URL</b>
-              </label>
-            {/if}
-            {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'azure-openai-chat' || provider.id == 'chatbotkit' || provider.id == 'anthropic-text' || provider.id == 'anthropic-messages'}
-              <label class=side>
-                <input type=checkbox bind:checked={endpoint.stream}>
-                <b>Stream</b>
-              </label>
-            {/if}
-          {/await}
-          <div class="buttons">
-            <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
-              <Fa icon={faShareNodes} {...faTheme} />
-            </button>
-            <button type=button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
-              <Fa icon={faXmarkLarge} {...faTheme} />
-            </button>
+      {#if isEditingConfig}
+        <h3>
+          API Endpoints
+          <button on:click={toggleEditingConfig} title="Toggle editing">
+            <Fa icon={faPenToSquare} {...faTheme} />
+          </button>
+          <button on:click={addEndpoint} title="Add endpoint">
+            <Fa icon={faPlusLarge} {...faTheme} />
+          </button>
+        </h3>
+        {#each endpoints as endpoint, ie}
+          <div class="endpoint">
+            <label class=side>
+              <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
+            </label>
+            <label class=over>
+              <b>Display name</b>
+              <input type=text bind:value={endpoint.name} placeholder="Display name">
+            </label>
+            <label class=over>
+              <b>Provider</b>
+              <select bind:value={endpoint.typeId} placeholder="Provider">
+                {#each AIConnectionFactory.providers as provider}
+                  <option value={provider.id}>{provider.displayName}</option>  
+                {/each}
+              </select>
+            </label>
+            {#await AIConnectionFactory.getProvider(endpoint.typeId) then provider}
+              {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'anthropic-text' || provider.id == 'anthropic-messages'}
+                <label class=over>
+                  <b>API key</b>
+                  <input type=text bind:value={endpoint.key} placeholder="API key">
+                </label>
+                <label class=over>
+                  <b>Base URL</b>
+                  <input type=text bind:value={endpoint.url} placeholder="Base URL">
+                </label>
+              {:else if provider.id == 'azure-openai-chat'}
+                <label class=over>
+                  <b>API key</b>
+                  <input type=text bind:value={endpoint.key} placeholder="API key">
+                </label>
+                <label class=over>
+                  <b>API Version</b>
+                  <input type=text bind:value={endpoint.apiVersion} placeholder="API Version">
+                </label>
+                <label class=over>
+                  <b>Resource</b>
+                  <input type=text bind:value={endpoint.resource} placeholder="Resource">
+                </label>
+                <label class=over>
+                  <b>Deployment</b>
+                  <input type=text bind:value={endpoint.deployment} placeholder="Deployment">
+                </label>
+              {:else}
+                <b>Choose endpoint provider</b>
+              {/if}
+              {#if provider.models.length > 0}
+                <label class=over>
+                  <b>Model name</b>
+                  <input type=text bind:value={endpoint.model} placeholder="Model name" list="{provider.id}-models">
+                </label>
+              {/if}
+              {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'anthropic-text' || provider.id == 'anthropic-messages'}
+                <label class=side>
+                  <input type=checkbox bind:checked={endpoint.rawUrl}>
+                  <b>Raw URL</b>
+                </label>
+              {/if}
+              {#if provider.id == 'openai-text' || provider.id == 'openai-chat' || provider.id == 'azure-openai-chat' || provider.id == 'anthropic-text' || provider.id == 'anthropic-messages'}
+                <label class=side>
+                  <input type=checkbox bind:checked={endpoint.stream}>
+                  <b>Stream</b>
+                </label>
+              {/if}
+            {/await}
+            <div class="buttons">
+              <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
+                <Fa icon={faShareNodes} {...faTheme} />
+              </button>
+              <button type=button on:click={() => deleteEndpoint(ie)} title="Delete endpoint">
+                <Fa icon={faXmarkLarge} {...faTheme} />
+              </button>
+            </div>
           </div>
-        </div>
-      {/each}
-      <h3>
-        Proxies
-        <button on:click={addProxy} title="Add proxy">
-          <Fa icon={faPlusLarge} {...faTheme} />
-        </button>
-      </h3>
-      {#each proxies as proxy, ip}
-        <div class="endpoint">
-          <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set proxy as current">
-          <label class=over>
-            <b>Display name</b>
-            <input type=text bind:value={proxy.name} placeholder="Display name">
-          </label>
-          <label class=over>
-            <b>Provider</b>
-            <select bind:value={proxy.typeId} placeholder="Provider">
-              {#each AIConnectionFactory.proxies as proxy}
-                <option value={proxy.id}>{proxy.displayName}</option>  
-              {/each}
-            </select>
-          </label>
-          {#await AIConnectionFactory.getProxy(proxy.typeId) then provider}
-            {#if provider.id == 'cors-anywhere'}
-              <label class=over>
-                <b>Proxy URL</b>
-                <input type=text bind:value={proxy.url} placeholder="Proxy URL">
-              </label>
-            {:else if provider.id != ''}
-              <b>Choose proxy provider</b>
-            {/if}
-          {/await}
-          <div class="buttons">
-            <button type=button on:click={() => deleteProxy(ip)} title="Delete proxy">
-              <Fa icon={faXmarkLarge} {...faTheme} />
-            </button>
+        {/each}
+        <h3>
+          Proxies
+          <button on:click={addProxy} title="Add proxy">
+            <Fa icon={faPlusLarge} {...faTheme} />
+          </button>
+        </h3>
+        {#each proxies as proxy, ip}
+          <div class="endpoint">
+            <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set proxy as current">
+            <label class=over>
+              <b>Display name</b>
+              <input type=text bind:value={proxy.name} placeholder="Display name">
+            </label>
+            <label class=over>
+              <b>Provider</b>
+              <select bind:value={proxy.typeId} placeholder="Provider">
+                {#each AIConnectionFactory.proxies as proxy}
+                  <option value={proxy.id}>{proxy.displayName}</option>  
+                {/each}
+              </select>
+            </label>
+            {#await AIConnectionFactory.getProxy(proxy.typeId) then provider}
+              {#if provider.id == 'cors-anywhere'}
+                <label class=over>
+                  <b>Proxy URL</b>
+                  <input type=text bind:value={proxy.url} placeholder="Proxy URL">
+                </label>
+              {:else if provider.id != ''}
+                <b>Choose proxy provider</b>
+              {/if}
+            {/await}
+            <div class="buttons">
+              <button type=button on:click={() => deleteProxy(ip)} title="Delete proxy">
+                <Fa icon={faXmarkLarge} {...faTheme} />
+              </button>
+            </div>
           </div>
+        {/each}
+      {:else}
+        <h3>
+          API Endpoints
+          <button on:click={toggleEditingConfig} title="Toggle editing">
+            <Fa icon={faPenToSquare} {...faTheme} />
+          </button>
+        </h3>
+        <div class="options">
+          {#each endpoints as endpoint, ie}
+            <label class="side-line">
+              <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
+              <b>{@html linkify(endpoint.name)}</b>
+            </label>
+          {/each}
         </div>
-      {/each}
+        <h3>Proxies</h3>
+        <div class="options">
+          {#each proxies as proxy, ip}
+            <label class="side-line">
+              <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set endpoint as current">
+              <b>{@html linkify(proxy.name)}</b>
+            </label>
+          {/each}
+        </div>
+      {/if}
       <h3>Model options</h3>
       <div class="options">
         <div class="option">
@@ -573,33 +590,15 @@
     </div>
     <details>
       <summary>Instructions</summary>
-      <h3>Scale API keys</h3>
-      <p>You can use one of the public keys or provide your own. Having your own keys gives more flexibility and better privacy.
-      <ol>
-        <li>Register on <a href="https://spellbook.scale.com/">Scale Spellbook</a>.
-        <li>Create an "app".
-        <li>Add a "prompt" with <code>model=GPT-4</code>, <code>max_tokens=512</code>, <code>temperature=1</code>,
-          <code>user_template={'{{'}input{'}}'}</code>.
-          <ul>
-            <li>Max token limit drastically (non-linearly) affects how fast the website responds. You can try lowering it,
-              especially if you plan to use it for chat, but forget about going above 1024 tokens.
-            <li>Temperature affects how wild the generations are, where 0.0 generates consistent responses and 2.0 is completely nuts.
-              Default value in OpenAI interface is 0.7. Recommended values are 0.4–1.0.
-            <li>Adjust the template if you plan to use the app for chat or other purposes. GPT-4 model will see the text
-              around <code>{'{{'}input{'}}'}</code>, but the chat app will not.
-          </ul>
-        <li>Add a "deployment" with this "prompt".
-        <li>Add a new Scale API endpoint in the chat's options and copy API key and URL from Scale website.
-      </ol>
       <h3>Proxy</h3>
       <p>The method of bypassing CORS restrictions for the chat script. One is enough.
       <ul>
         <li><b>Direct</b>:
           <ul>
             <li><b>User script</b> <i>(desktop/mobile)</i>:
-              Install <a href="https://athari.github.io/ScaleChat/userscripts/bypasscors.user.js">Bypass CORS</a> userscript.
+              Install <a href="https://athari.github.io/NotAIChat/userscripts/bypasscors.user.js">Bypass CORS</a> userscript.
               Install <a href="https://www.tampermonkey.net/">TamperMonkey</a> extension or any other user script manager first,
-              in case you don't an option to install the script when you click the link.
+              in case you don't see an option to install the script when you click the link.
               This method enables bypassing CORS only for specific user script and domain, however running locally is impossible
               and running on another server requires editing the user script.
             <li><b>Extension</b> <i>(desktop)</i>:
@@ -614,26 +613,8 @@
           Go to <a href="https://cors-anywhere.herokuapp.com/corsdemo">CORS Anywhere Demo</a> page and click on the button to enable it.
           You may be asked to solve CAPTCHA. Note that CORS Demo can timeout way earlier than actual API.
           This method allows all websites using that specific website to bypass CORS.
-        <li><b>Web proxy</b> <i>(desktop/mobile)</i>:
-          Use <a href="https://fishtailprotocol.com/projects/betterGPT4/">Web proxy by Feril</a>. No configuration required. This
-          method works exclusively with Scale API.
       </ul>
-      <h3>Privacy</h3>
-      <p>Privacy does not exist.
-      <ul>
-        <li>All your prompts and responses are visible to the owner of the Scale API key.
-        <li>All your prompts, responses and keys are visible to the company that owns Scale API.
-        <li>All your prompts, responses and keys are visible to the owner of CORS and web proxies.
-      </ul>
-      <p>Recommendations for maximum privacy:
-      <ul>
-        <li>Do not use public Scale API keys.
-        <lI>Do not use proxies owned by people you don't trust.
-        <li>Do not send any information which could be used to identify you.
-        <li>Do register on Scale with fake data, including fake email.
-        <li>Do live in countries where FBI can't reach you and put in jail for having bad thoughts.
-      </ul>
-  </details>
+    </details>
   </details>
   <div class="messages">
     {#each messages as message, im}
@@ -778,7 +759,7 @@
     width: 400px;
     label {
       flex: 1;
-    }    
+    }
   }
   .option-long {
     display: flex;
@@ -824,6 +805,13 @@
       min-height: 20px;
       padding: 0;
       margin: 0;
+    }
+  }
+  label.side-line {
+    flex: 0;
+    white-space: nowrap;
+    b {
+      font-weight: inherit;
     }
   }
   textarea,

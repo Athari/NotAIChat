@@ -47,6 +47,19 @@ export function generateUuid() {
   }
 }
 
+export function linkify(s) {
+  const tags = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' };
+  const reLink = /https?:\/\/(\S+)/ig;
+  const escape = s => s.replace(/[&<>"]/g, t => tags[t] || t);
+  let m = null, i = 0, html = "";
+  while ((m = reLink.exec(s)) != null) {
+    html += `${escape(s.slice(i, m.index))}<a href="${escape(m[0])}">${escape(m[1])}</a>`
+    i = m.index + m[0].length;
+  }
+  html += escape(s.slice(i));
+  return html;
+}
+
 export function loadData(id, defaultData) {
   try {
     const data = JSON.parse(localStorage.getItem(id));
