@@ -315,6 +315,13 @@
     }
   }
 
+  function swapEndpoints(ie1, ie2) {
+    if (endpoints[ie1] === undefined || endpoints[ie2] === undefined)
+      return;
+    [ endpoints[ie1], endpoints[ie2] ] = [ endpoints[ie2], endpoints[ie1] ];
+    endpoints = [ ...endpoints ];
+  }
+
   function deleteEndpoint(ie) {
     endpoints = endpoints.filter((e, i) => i !== ie);
     if (endpoints[options.selectedEndpointIndex] === undefined)
@@ -450,6 +457,12 @@
               {/if}
             {/await}
             <div class="buttons">
+              <button on:click={() => swapEndpoints(ie, ie - 1)} disabled={ie <= 0} title="Move endpoint up">
+                <Fa icon={faArrowUp} {...faTheme} />
+              </button>
+              <button type=button on:click={() => swapEndpoints(ie, ie + 1)} disabled={ie >= endpoints.length - 1} title="Move endpoint down">
+                <Fa icon={faArrowDown} {...faTheme} />
+              </button>
               <button type=button on:click={() => shareEndpointLink(ie)} title="Share endpoint link">
                 <Fa icon={faShareNodes} {...faTheme} />
               </button>
@@ -467,7 +480,9 @@
         </h3>
         {#each proxies as proxy, ip}
           <div class="endpoint">
-            <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set proxy as current">
+            <label class=side>
+              <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set proxy as current">
+            </label>
             <label class=over>
               <b>Display name</b>
               <input type=text bind:value={proxy.name} placeholder="Display name">
@@ -623,12 +638,6 @@
         <textarea bind:value={message.text} placeholder="Message #{message.id} text"
                   autocomplete=false use:autoResizeTextArea></textarea>
         <div class="buttons">
-          <button on:click={() => swapMessages(im, im - 1)} disabled={im <= 0} title="Move message up">
-            <Fa icon={faArrowUp} {...faTheme} />
-          </button>
-          <button type=button on:click={() => swapMessages(im, im + 1)} disabled={im >= messages.length - 1} title="Move message down">
-            <Fa icon={faArrowDown} {...faTheme} />
-          </button>
           <button type=button on:click={() => deleteMessage(im)} title="Delete message">
             <Fa icon={faXmarkLarge} {...faTheme} />
           </button>
