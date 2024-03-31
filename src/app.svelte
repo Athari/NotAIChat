@@ -16,6 +16,9 @@
   import { faPlusLarge } from '@fortawesome/pro-solid-svg-icons/faPlusLarge'
   import { faRocketLaunch } from '@fortawesome/pro-regular-svg-icons/faRocketLaunch'
   import { faShareNodes } from '@fortawesome/pro-regular-svg-icons/faShareNodes'
+  import { faSquare } from '@fortawesome/pro-regular-svg-icons/faSquare'
+  import { faSquareCheck } from '@fortawesome/pro-regular-svg-icons/faSquareCheck'
+  import { faSquareRing } from '@fortawesome/pro-regular-svg-icons/faSquareRing'
   import { faTurtle } from '@fortawesome/pro-regular-svg-icons/faTurtle'
   import { faXmarkLarge } from '@fortawesome/pro-solid-svg-icons/faXmarkLarge'
 
@@ -164,8 +167,8 @@
     }
 
     controller = new AbortController();
-    const lastMessage = messages.at(-1);
-    const allMessages = messages.filter(m => m.text?.length > 0);
+    const lastMessage = messages.filter(m => m.include).at(-1);
+    const allMessages = messages.filter(m => m.include && m.text?.length > 0);
     let targetMessage = lastMessage?.text == "" || lastMessage.role == 'assistant' ? lastMessage : null;
     let isTextReceived = false;
     let indexText;
@@ -178,7 +181,7 @@
       onMessage(message) {
         if (message.mode != 'done') {
           if (targetMessage == null) {
-            targetMessage = { id: getNextMessageId(), text: message.text, role: message.role };
+            targetMessage = { id: getNextMessageId(), text: message.text, role: message.role, include: true };
             messages = [ ...messages, targetMessage ];
           } else {
             targetMessage.text += message.text;
@@ -247,7 +250,7 @@
   function addMessage(e) {
     if (newMessage.text == "")
       return;
-    messages = [ ...messages, { id: getNextMessageId(), text: newMessage.text, role: newMessage.role } ];
+    messages = [ ...messages, { id: getNextMessageId(), text: newMessage.text, role: newMessage.role, include: true } ];
     newMessage.text = "";
     updateMessageTextAreaSize(e);
   }
@@ -262,6 +265,12 @@
     if (messages[im1] === undefined || messages[im2] === undefined)
       return;
     [ messages[im1], messages[im2] ] = [ messages[im2], messages[im1] ];
+    messages = [ ...messages ];
+  }
+
+  function setAllMessagesInclude(set) {
+    for (const message of messages)
+      message.include = set(message.include);
     messages = [ ...messages ];
   }
 
@@ -384,10 +393,10 @@
         <h3>
           API Endpoints
           <button on:click={toggleEditingConfig} title="Toggle editing">
-            <Fa icon={faPenToSquare} {...faTheme} />
+            <Fa icon={faPenToSquare} {...faThemeWithLabel} />Edit
           </button>
           <button on:click={addEndpoint} title="Add endpoint">
-            <Fa icon={faPlusLarge} {...faTheme} />
+            <Fa icon={faPlusLarge} {...faThemeWithLabel} />Add
           </button>
         </h3>
         {#each endpoints as endpoint, ie}
@@ -516,12 +525,12 @@
         <h3>
           API Endpoints
           <button on:click={toggleEditingConfig} title="Toggle editing">
-            <Fa icon={faPenToSquare} {...faTheme} />
+            <Fa icon={faPenToSquare} {...faThemeWithLabel} />Edit
           </button>
         </h3>
         <div class="options">
           {#each endpoints as endpoint, ie}
-            <label class="side-line">
+            <label class="side-line" class:selected={ie == options.selectedEndpointIndex}>
               <input type=radio bind:group={options.selectedEndpointIndex} name=selectedEndpoint value={ie} title="Set endpoint as current">
               <b>{@html linkify(endpoint.name)}</b>
             </label>
@@ -530,7 +539,7 @@
         <h3>Proxies</h3>
         <div class="options">
           {#each proxies as proxy, ip}
-            <label class="side-line">
+            <label class="side-line" class:selected={ip == options.selectedProxyIndex}>
               <input type=radio bind:group={options.selectedProxyIndex} name=selectedProxy value={ip} title="Set endpoint as current">
               <b>{@html linkify(proxy.name)}</b>
             </label>
@@ -575,7 +584,7 @@
           <input type=text bind:value={options.retryMessageCount} id=retryMessageCount />
         </div>
       </div>
-      <h3>Backups</h3>
+      <h3>Operations</h3>
       <div class="options">
         <div class="option-long">
           <header>Endpoints</header>
@@ -599,6 +608,16 @@
           </button>
           <button type=button on:click={() => saveMessages()}>
             <Fa icon={faFloppyDisk} {...faThemeWithLabel} />Save
+          </button>
+          <b>|</b>
+          <button type=button on:click={() => setAllMessagesInclude(i => true)}>
+            <Fa icon={faSquareCheck} {...faThemeWithLabel} />Check all
+          </button>
+          <button type=button on:click={() => setAllMessagesInclude(i => !i)}>
+            <Fa icon={faSquareRing} {...faThemeWithLabel} />Toggle all
+          </button>
+          <button type=button on:click={() => setAllMessagesInclude(i => false)}>
+            <Fa icon={faSquare} {...faThemeWithLabel} />Uncheck all
           </button>
         </div>
       </div>
@@ -634,6 +653,9 @@
   <div class="messages">
     {#each messages as message, im}
       <div class="message">
+        <label>
+          <input type=checkbox bind:checked={message.include} />
+        </label>
         <input type=text bind:value={message.role} list=messageRole placeholder="Role" />
         <textarea bind:value={message.text} placeholder="Message #{message.id} text"
                   autocomplete=false use:autoResizeTextArea></textarea>
@@ -646,6 +668,9 @@
     {/each}
   </div>
   <div class="message new-message">
+    <label style="visibility: hidden;">
+      <input type=checkbox />
+    </label>
     <input type=text bind:value={newMessage.role} disabled={isSending} list=messageRole placeholder="New message role" />
     <textarea bind:value={newMessage.text} disabled={isSending} placeholder="New message text"
               autocomplete=false use:autoResizeTextArea></textarea>
@@ -692,9 +717,10 @@
   :global(:root) {
     --button-width: 38px;
     --gap: 8px;
+    --font: 15px/1.2 Segoe UI, sans-serif;
     color-scheme: dark;
     overflow-wrap: break-word;
-    font: 15px/1.2 Segoe UI, sans-serif;
+    font: var(--font);
     *,
     *::before,
     *::after {
@@ -760,6 +786,9 @@
     input[type=text][list] {
       flex: 0 0 120px;
     }
+    label {
+      padding-top: 4px;
+    }
   }
   .endpoint {
     flex-flow: row wrap;
@@ -775,10 +804,11 @@
     flex-flow: row wrap;
     gap: 8px;
     align-items: center;
-    button {
-      width: auto;
-      padding: 0 12px;
-    }
+  }
+  :is(.option-long, h3) button {
+    width: auto;
+    padding: 0 12px;
+    font: var(--font);
   }
   :is(.endpoint) .buttons {
     padding: calc(1lh + 4px) 0 0 0;
@@ -809,12 +839,6 @@
     b {
       font-weight: inherit;
     }
-    input:is([type=checkbox], [type=radio]) {
-      width: 20px;
-      min-height: 20px;
-      padding: 0;
-      margin: 0;
-    }
   }
   label.side-line {
     flex: 0;
@@ -822,6 +846,16 @@
     b {
       font-weight: inherit;
     }
+  }
+  :is(label.side, .message) input:is([type=checkbox], [type=radio]) {
+    width: 20px;
+    min-height: 20px;
+    padding: 0;
+    margin: 0;
+  }
+  .selected {
+    color: #ffc;
+    border-radius: 4px;
   }
   textarea,
   input[type=text],
