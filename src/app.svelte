@@ -295,6 +295,13 @@
     endpoints = [ ...endpoints, AIConnectionFactory.createDefaultProviderConfig() ];
   }
 
+  function updateEndpointTypeId(ie) {
+    const endpoint = endpoints[ie];
+    const newEndpoint = AIConnectionFactory.getProvider(endpoint.typeId).createConfig();
+    Object.keys(newEndpoint).filter(k => Object.hasOwn(endpoint, k)).forEach(k => newEndpoint[k] = endpoint[k]);
+    endpoints[ie] = newEndpoint;
+  }
+
   function addEndpointFromSearchParams(params) {
     const endpoint = {
       name: params.get('name') ?? "Shared endpoint",
@@ -410,7 +417,7 @@
             </label>
             <label class=over>
               <b>Provider</b>
-              <select bind:value={endpoint.typeId} placeholder="Provider">
+              <select bind:value={endpoint.typeId} on:change={() => updateEndpointTypeId(ie)} placeholder="Provider">
                 {#each AIConnectionFactory.providers as provider}
                   <option value={provider.id}>{provider.displayName}</option>  
                 {/each}
@@ -779,6 +786,7 @@
     display: flex;
     flex-flow: row;
     align-items: stretch;
+    justify-content: flex-end;
     gap: 8px;
   }
   .message {

@@ -6,15 +6,15 @@ export class AIConnectionFactory {
   static providers = [];
   static proxies = [];
 
-  displayName;
   id;
+  displayName;
+  runner;
   defaultConfig;
   messageRoles;
   models;
-  runner;
 
-  constructor(id, displayName, runner, configGetter, messageRoles, models) {
-    Object.assign(this, { id, displayName, runner, configGetter, messageRoles, models });
+  constructor(id, displayName, runner, defaultConfig, messageRoles, models) {
+    Object.assign(this, { id, displayName, runner, defaultConfig, messageRoles, models });
   }
 
   static init() {
