@@ -40,6 +40,7 @@
   let proxies = [ AIConnectionFactory.createDefaultProxyConfig() ];
   let messages = [ { id: 1, role: 'user', text: "Hello GPT-4!" } ];
   let newMessage = { id: 0, role: 'user', text: "" };
+  let images = [ { uri: "", title: "" } ];
   let isSending = false;
   let sendTime = null;
   let sendTimeText = "";
@@ -176,6 +177,7 @@
       get signal() { return controller.signal },
       get extraText() { return `${indexText} in ${getPreciseTimeText()}` },
       get messages() { return allMessages },
+      get images() { return images },
     };
     Object.assign(api, {
       onMessage(message) {
@@ -289,6 +291,28 @@
 
   function toggleEditingConfig() {
     isEditingConfig = !isEditingConfig;
+  }
+
+  function dropImage(e, ii) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        images[ii] = { uri: reader.result, title: file.name };
+        if (ii == images.length - 1)
+          images = [ ...images, { uri: "", title: "" } ];
+      };
+      reader.readAsDataURL(file);
+    } 
+  }
+
+  async function copyImageLink(ii) {
+    await navigator.clipboard.writeText(`<img>${images[ii].title}</img>`);
+  }
+
+  function deleteImage(ii) {
+    images = images.filter((_, i) => i !== ii);
   }
 
   function addEndpoint() {
@@ -469,6 +493,12 @@
                 <label class=side>
                   <input type=checkbox bind:checked={endpoint.stream}>
                   <b>Stream</b>
+                </label>
+              {/if}
+              {#if provider.id == 'openai-chat' || provider.id == 'azure-openai-chat' || provider.id == 'anthropic-messages'}
+                <label class=side>
+                  <input type=checkbox bind:checked={endpoint.vision}>
+                  <b>Vision</b>
                 </label>
               {/if}
             {/await}
@@ -657,6 +687,26 @@
       </ul>
     </details>
   </details>
+  <div class="images">
+    {#each images as image, ii}
+      <figure class="image-drop" on:drop={e => dropImage(e, ii)} on:dragover={e => e.preventDefault()}>
+        {#if image.uri}
+          <img src="{image.uri}" alt="Image {ii}: {image.title}" />
+          <figcaption>{image.title}</figcaption>
+        {:else}
+          <figcaption>Image {ii}</figcaption>
+        {/if}
+        <div class="buttons" style:visibility={image.uri ? 'visible' : 'hidden'}>
+          <button type=button on:click={() => copyImageLink(ii)} title="Copy image link">
+            <Fa icon={faCopy} {...faTheme} />
+          </button>
+          <button type=button on:click={() => deleteImage(ii)} title="Delete image">
+            <Fa icon={faXmarkLarge} {...faTheme} />
+          </button>
+        </div>
+      </figure>
+    {/each}
+  </div>
   <div class="messages">
     {#each messages as message, im}
       <div class="message">
@@ -675,8 +725,8 @@
     {/each}
   </div>
   <div class="message new-message">
-    <label style="visibility: hidden;">
-      <input type=checkbox />
+    <label>
+      <input type=checkbox disabled checked />
     </label>
     <input type=text bind:value={newMessage.role} disabled={isSending} list=messageRole placeholder="New message role" />
     <textarea bind:value={newMessage.text} disabled={isSending} placeholder="New message text"
@@ -703,7 +753,7 @@
     </div>
   </div>
   <div class="status">
-    <p class="message">{statusText}</p>
+    <p class="text">{statusText}</p>
     <p class="time" style:display={isSending ? 'block' : 'none'}>{sendTimeText}</p>
   </div>
   <datalist id=messageRole>
@@ -828,6 +878,33 @@
       flex-flow: row wrap;
     }
   }
+  .images {
+    display: flex;
+    flex-flow: row wrap;
+    gap: 8px;
+    margin: 8px 0;
+    .image-drop {
+      position: relative;
+      display: flex;
+      flex-flow: column;
+      align-items: center;
+      margin: 0;
+      padding: 4px 8px;
+      background: #111;
+      border: dashed 1px #666;
+      &:has(img) {
+        border-style: solid;
+      }
+      img {
+        flex: 1;
+        max-height: 120px;
+      }
+      .buttons {
+        position: absolute;
+        inset: 8px 8px auto auto;
+      }
+    }
+  }
   label.over {
     display: flex;
     flex-flow: column;
@@ -887,7 +964,7 @@
     display: flex;
     flex-flow: row;
     opacity: 0.6;
-    .message {
+    .text {
       flex: 1;
     }
     .time {

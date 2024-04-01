@@ -21,7 +21,7 @@ export class AIConnectionFactory {
     AIConnectionFactory.providers = [
       new AIConnectionFactory(
         '', "", EmptyAIProvider,
-        { key: "", url: "", model: "", resource: "", deployment: "", apiVersion: "", stream: true, rawUrl: false },
+        { key: "", url: "", model: "", resource: "", deployment: "", apiVersion: "", stream: true, rawUrl: false, vision: false },
         [], [],
       ),
       new AIConnectionFactory(
@@ -31,7 +31,7 @@ export class AIConnectionFactory {
       ),
       new AIConnectionFactory(
         'openai-chat', "OpenAI Chat", OpenAIChatProvider,
-        { key: "", url: "", model: "", stream: true, rawUrl: false },
+        { key: "", url: "", model: "", stream: true, rawUrl: false, vision: false },
         [ 'user', 'assistant', 'system' ],
         [
           // https://platform.openai.com/docs/models
@@ -68,7 +68,7 @@ export class AIConnectionFactory {
       ),
       new AIConnectionFactory(
         'anthropic-messages', "Anthropic Messages", AnthropicMessagesProvider,
-        { key: "", url: "", model: "", stream: true, rawUrl: false },
+        { key: "", url: "", model: "", stream: true, rawUrl: false, vision: false },
         [ 'user', 'assistant', 'system' ],
         [
           'claude-3-opus-20240229',
@@ -225,7 +225,7 @@ export class OpenAITextProvider extends AIProvider {
       if (!response.ok) {
         const text = await response.text();
         const message = parseJSONOrNull(text);
-        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message?.error ?? text?.slice(0, 256)), state, response);
       }
       if (this.config.stream) {
         for await (const event of events(response, options.signal)) {
@@ -259,7 +259,7 @@ export class OpenAIChatProvider extends AIProvider {
     const options = this.createFetchJsonOptions(state.signal, {
       messages: state.messages.map(m => ({
         role: getMessageRole(m.role),
-        content: m.text,
+        content: this.formatMessageContent(m.text, state.images),
       })),
       model: this.config.model,
       max_tokens: this.config.maxTokens,
@@ -275,7 +275,7 @@ export class OpenAIChatProvider extends AIProvider {
       if (!response.ok) {
         const text = await response.text();
         const message = parseJSONOrNull(text);
-        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message?.error ?? text?.slice(0, 256)), state, response);
       }
       if (this.config.stream) {
         for await (const event of events(response, options.signal)) {
@@ -297,6 +297,33 @@ export class OpenAIChatProvider extends AIProvider {
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
     }
+  }
+
+  formatMessageContent(text, images) {
+    if (!this.config.vision)
+      return text;
+
+    const content = [];
+    const addText = text => {
+      if (text)
+        content.push({ type: 'text', text });
+    };
+    const addImage = url => {
+      content.push({ type: 'image_url', image_url: { url } });
+    };
+    const reImageRef = /<img>([^<>]+?)<\/img>/ig;
+    let m = null, i = 0;
+    while ((m = reImageRef.exec(text)) != null) {
+      addText(text.slice(i, m.index));
+      const image = images.find(i => i.title == m[1]);
+      if (image)
+        addImage(image.uri);
+      else
+        addText(m[0]);
+      i = m.index + m[0].length;
+    }
+    addText(text.slice(i));
+    return content;
   }
 }
 
@@ -378,7 +405,7 @@ export class AnthropicTextProvider extends AnthropicProvider {
       if (!response.ok) {
         const text = await response.text();
         const message = parseJSONOrNull(text);
-        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message?.error ?? text?.slice(0, 256)), state, response);
       }
       if (this.config.stream) {
         const stream = events(response, options.signal);
@@ -416,7 +443,7 @@ export class AnthropicMessagesProvider extends AnthropicProvider {
     const options = this.createFetchJsonOptions(state.signal, {
       messages: state.messages.filter(m => getMessageRole(m.role) != 'system').map(m => ({
         role: getMessageRole(m.role),
-        content: m.text.trimRight(),
+        content: this.formatMessageContent(m.text, state.images),
       })),
       system: state.messages.filter(m => getMessageRole(m.role) == 'system').map(m => m.text).join("\n").trim(),
       model: this.config.model,
@@ -432,7 +459,7 @@ export class AnthropicMessagesProvider extends AnthropicProvider {
       if (!response.ok) {
         const text = await response.text();
         const message = parseJSONOrNull(text);
-        return this.raiseError("Query failed", new Error(message?.error?.message ?? message.error ?? text?.slice(0, 256)), state, response);
+        return this.raiseError("Query failed", new Error(message?.error?.message ?? message?.error ?? text?.slice(0, 256)), state, response);
       }
       if (this.config.stream) {
         for await (const event of events(response, options.signal)) {
@@ -467,6 +494,43 @@ export class AnthropicMessagesProvider extends AnthropicProvider {
     } catch (ex) {
       return this.raiseError("Query failed", ex, state, response);
     }
+  }
+
+  formatMessageContent(text, images) {
+    text = text.trimRight();
+    if (!this.config.vision)
+      return text;
+
+    const content = [];
+    const addText = (text) => {
+      if (text)
+        content.push({ type: 'text', text });
+    };
+    const addImage = (mime, data) => {
+      content.push({
+        type: 'image',
+        source: { type: 'base64', media_type: mime, data },
+      });
+    };
+    const reImageRef = /<img>([^<>]+?)<\/img>/ig, reDataUri = /data:(image\/\w+);base64,(.*)/;
+    let m = null, i = 0;
+    while ((m = reImageRef.exec(text)) != null) {
+      addText(text.slice(i, m.index));
+      const image = images.find(i => i.title == m[1]);
+      let addedImage = false;
+      if (image) {
+        const mUri = reDataUri.exec(image.uri);
+        if (mUri) {
+          addImage(mUri[1], mUri[2]);
+          addedImage = true;
+        }
+      }
+      if (!addedImage)
+        addText(m[0]);
+      i = m.index + m[0].length;
+    }
+    addText(text.slice(i));
+    return content;
   }
 }
 
