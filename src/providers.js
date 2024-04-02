@@ -1,6 +1,6 @@
 'use strict'
 
-import { parseFloatOrNull, parseIntOrNull, parseJSONOrNull, events } from './utils'
+import { parseFloatOrNull, parseIntOrNull, parseJSONOrNull, events, regexMatchesUnmatches } from './utils'
 
 export class AIConnectionFactory {
   static providers = [];
@@ -82,7 +82,7 @@ export class AIConnectionFactory {
         ],
       ),
     ];
-  
+
     AIConnectionFactory.proxies = [
       new AIConnectionFactory(
         '', "Direct", DirectProxy,
@@ -232,7 +232,7 @@ export class OpenAITextProvider extends AIProvider {
           const message = event.json;
           switch (message?.object) {
             case 'text_completion':
-              this.raiseMessage({ text: message.choices?.[0]?.text ?? "", role: 'assistant', mode: 'append', data: [ message ] });
+              this.raiseMessage({ text: message.choices?.[0]?.text ?? "", role: 'assistant', mode: 'append', data: [ event ] });
               break;
             default:
               this.raiseLogMessage({ text: `Event ${message?.object ?? "?"}`, data: [ event ]});
@@ -282,7 +282,7 @@ export class OpenAIChatProvider extends AIProvider {
           const message = event.json;
           switch (message?.object) {
             case 'chat.completion.chunk':
-              this.raiseMessage({ text: message.choices?.[0]?.delta?.content ?? "", role: 'assistant', mode: 'append', data: [ message ] });
+              this.raiseMessage({ text: message.choices?.[0]?.delta?.content ?? "", role: 'assistant', mode: 'append', data: [ event ] });
               break;
             default:
               this.raiseLogMessage({ text: `Event ${message?.object ?? "?"}`, data: [ event ]});
@@ -299,30 +299,17 @@ export class OpenAIChatProvider extends AIProvider {
     }
   }
 
-  formatMessageContent(text, images) {
+  formatMessageContent(str, images) {
     if (!this.config.vision)
-      return text;
+      return str;
 
     const content = [];
-    const addText = text => {
-      if (text)
-        content.push({ type: 'text', text });
-    };
-    const addImage = url => {
-      content.push({ type: 'image_url', image_url: { url } });
-    };
-    const reImageRef = /<img>([^<>]+?)<\/img>/ig;
-    let m = null, i = 0;
-    while ((m = reImageRef.exec(text)) != null) {
-      addText(text.slice(i, m.index));
-      const image = images.find(i => i.title == m[1]);
-      if (image)
-        addImage(image.uri);
-      else
-        addText(m[0]);
-      i = m.index + m[0].length;
+    for (const [ isImage, text, title ] of regexMatchesUnmatches(/<img>([^<>]+?)<\/img>/ig, str)) {
+      const image = isImage ? images.find(i => i.title == title) : null;
+      content.push(image
+        ? { type: 'image_url', image_url: { url: image.uri } }
+        : { type: 'text', text });
     }
-    addText(text.slice(i));
     return content;
   }
 }
@@ -413,7 +400,7 @@ export class AnthropicTextProvider extends AnthropicProvider {
           const message = event.json;
           switch (event.type ?? message?.type) {
             case 'completion':
-              this.raiseMessage({ text: message.completion ?? "", role: 'assistant', mode: 'append', data: [ message ] });
+              this.raiseMessage({ text: message.completion ?? "", role: 'assistant', mode: 'append', data: [ event ] });
               break;
             case 'error':
               this.raiseError("Received error", new Error(message?.error?.message), state, response);
@@ -470,13 +457,13 @@ export class AnthropicMessagesProvider extends AnthropicProvider {
               break;
             case 'message_start':
               const info = message.message ?? message;
-              this.raiseLogMessage({ text: `Message start (model: ${info.model}, input: ${info.usage?.input_tokens} tokens)`, data: [ message ]})
+              this.raiseLogMessage({ text: `Message start (model: ${info.model}, input: ${info.usage?.input_tokens} tokens)`, data: [ event ]})
               break;
             case 'message_stop':
               const bedrockMetrics = message['amazon-bedrock-invocationMetrics'];
               const inputTokenCount = message.inputTokenCount ?? bedrockMetrics?.inputTokenCount;
               const outputTokenCount = message.outputTokenCount ?? bedrockMetrics?.outputTokenCount;
-              this.raiseLogMessage({ text: `Message stop (input: ${inputTokenCount} tokens, output: ${outputTokenCount})`, data: [ message ]})
+              this.raiseLogMessage({ text: `Message stop (input: ${inputTokenCount} tokens, output: ${outputTokenCount})`, data: [ event ]})
               break;
             case 'error':
               this.raiseError("Received error", new Error(message?.error?.message), state, response);
@@ -496,41 +483,19 @@ export class AnthropicMessagesProvider extends AnthropicProvider {
     }
   }
 
-  formatMessageContent(text, images) {
-    text = text.trimRight();
+  formatMessageContent(str, images) {
+    str = str.trimRight();
     if (!this.config.vision)
-      return text;
+      return str;
 
     const content = [];
-    const addText = (text) => {
-      if (text)
-        content.push({ type: 'text', text });
-    };
-    const addImage = (mime, data) => {
-      content.push({
-        type: 'image',
-        source: { type: 'base64', media_type: mime, data },
-      });
-    };
-    const reImageRef = /<img>([^<>]+?)<\/img>/ig, reDataUri = /data:(image\/\w+);base64,(.*)/;
-    let m = null, i = 0;
-    while ((m = reImageRef.exec(text)) != null) {
-      addText(text.slice(i, m.index));
-      const image = images.find(i => i.title == m[1]);
-      let addedImage = false;
-      if (image) {
-        const mUri = reDataUri.exec(image.uri);
-        if (mUri) {
-          addImage(mUri[1], mUri[2]);
-          addedImage = true;
-        }
-      }
-      if (!addedImage)
-        addText(m[0]);
-      i = m.index + m[0].length;
+    for (const [ isImage, text, title ] of regexMatchesUnmatches(/<img>([^<>]+?)<\/img>/ig, str)) {
+      const [ _, mime, data ] = (isImage ? images.find(i => i.title == title) : null)?.uri.match(/data:(image\/\w+);base64,(.*)/) ?? [];
+      content.push(mime && data
+        ? { type: 'image', source: { type: 'base64', media_type: mime, data } }
+        : { type: 'text', text });
     }
-    addText(text.slice(i));
-    return content;
+    return content.length == 1 && content[0].type == 'text' ? content[0].text : content;
   }
 }
 

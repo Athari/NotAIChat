@@ -49,13 +49,13 @@
   let controller = null;
   let isLoaded = false;
   let isEditingConfig = false;
-  
+
   let selectedEndpoint = null;
   let selectedProxy = null;
   let elRoot = null;
   let faTheme = { scale: 1.3 };
   let faThemeWithLabel = Object.assign({}, faTheme);
-  
+
   const textAreaHeight = 20;
   const faThemeScaleMap = { compact: 1.3, mobile: 1.7, access: 2.1 };
   const secondNumberFormat0 = new Intl.NumberFormat('en-gb',
@@ -127,7 +127,7 @@
   function downloadChatJsonFile(fileName, data) {
     downloadFile('application/json', `NotAIChat ${fileName} ${getFileNameDate()}.json`,
       JSON.stringify(data, null, "  "));
-  }  
+  }
 
   async function loadEndpoints(isAppend) {
     const json = await uploadFile('.json, application/json');
@@ -299,16 +299,23 @@
     if (file) {
       const reader = new FileReader();
       reader.onload = () => {
+        const [ oldLink, newLink ] = [ formatImageLink(images[ii].title), formatImageLink(file.name) ];
         images[ii] = { uri: reader.result, title: file.name };
         if (ii == images.length - 1)
           images = [ ...images, { uri: "", title: "" } ];
+        messages = messages.map(m =>
+          (m.text = m.text.replace(oldLink, newLink), m));
       };
       reader.readAsDataURL(file);
-    } 
+    }
+  }
+
+  function formatImageLink(title) {
+    return `<img>${title}</img>`;
   }
 
   async function copyImageLink(ii) {
-    await navigator.clipboard.writeText(`<img>${images[ii].title}</img>`);
+    await navigator.clipboard.writeText(formatImageLink(images[ii].title));
   }
 
   function deleteImage(ii) {
@@ -443,7 +450,7 @@
               <b>Provider</b>
               <select bind:value={endpoint.typeId} on:change={() => updateEndpointTypeId(ie)} placeholder="Provider">
                 {#each AIConnectionFactory.providers as provider}
-                  <option value={provider.id}>{provider.displayName}</option>  
+                  <option value={provider.id}>{provider.displayName}</option>
                 {/each}
               </select>
             </label>
@@ -537,7 +544,7 @@
               <b>Provider</b>
               <select bind:value={proxy.typeId} placeholder="Provider">
                 {#each AIConnectionFactory.proxies as proxy}
-                  <option value={proxy.id}>{proxy.displayName}</option>  
+                  <option value={proxy.id}>{proxy.displayName}</option>
                 {/each}
               </select>
             </label>
@@ -888,6 +895,7 @@
       display: flex;
       flex-flow: column;
       align-items: center;
+      min-width: 122px;
       margin: 0;
       padding: 4px 8px;
       background: #111;
